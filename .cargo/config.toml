@@ -1,0 +1,8 @@
+# Rewrite absolute paths embedded in the release binary by Rust's `file!()`
+# macro (used in panic messages and assertions). Without this, strings like
+# `/Users/admin/.cargo/registry/...` end up in the distributed binary,
+# revealing the build-machine username. Maps the build user's home prefix
+# to a neutral `/build` so reverse-engineers and `strings` see no host
+# fingerprints.
+[build]
+rustflags = ["--remap-path-prefix=/Users/admin=/build"]

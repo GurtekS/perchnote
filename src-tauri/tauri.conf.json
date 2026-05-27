@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicholastay/tauri-schema/v2/schema.json",
   "productName": "Perchnote",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "com.perchnote.app",
   "build": {
     "frontendDist": "../dist",

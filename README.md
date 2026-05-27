@@ -81,7 +81,7 @@ To verify the download, compare against the `.sha256` checksum file
 published next to the DMG on the release page:
 
 ```sh
-shasum -a 256 -c Perchnote_0.1.1_aarch64.dmg.sha256
+shasum -a 256 -c Perchnote_0.1.2_aarch64.dmg.sha256
 ```
 
 Apple-silicon Macs only for now (the published asset is `aarch64`).

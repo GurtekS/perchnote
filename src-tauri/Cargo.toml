@@ -1,6 +1,6 @@
 [package]
 name = "perchnote"
-version = "0.1.1"
+version = "0.1.2"
 description = "Perchnote — local-first meeting notes for macOS with on-device transcription."
 license = "MIT"
 edition = "2021"
@@ -47,3 +47,7 @@ base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[profile.release]
+strip = "symbols"
+
