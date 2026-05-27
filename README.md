@@ -62,10 +62,35 @@ ask for AI notes.
   `whisper-cpp` via Homebrew and the app will pick up its model directory
   automatically.
 
+## 📥 Install
+
+Grab the latest `.dmg` from the
+[releases page](https://github.com/GurtekS/perchnote/releases/latest),
+open it, and drag **Perchnote** to `/Applications`.
+
+The build is currently unsigned, so the first launch will hit Gatekeeper.
+Right-click the app in `/Applications` and choose **Open**, then confirm
+the warning. From then on it launches normally. If you'd rather clear
+the quarantine flag in one shot:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Perchnote.app
+```
+
+To verify the download, compare against the `.sha256` checksum file
+published next to the DMG on the release page:
+
+```sh
+shasum -a 256 -c Perchnote_0.1.0_aarch64.dmg.sha256
+```
+
+Apple-silicon Macs only for now (the published asset is `aarch64`).
+Intel users should build from source.
+
 ## 🚀 Quick start
 
 ```sh
-git clone https://github.com/<you>/perchnote.git
+git clone https://github.com/GurtekS/perchnote.git
 cd perchnote
 npm install
 npm run tauri dev
