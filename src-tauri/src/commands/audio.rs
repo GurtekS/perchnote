@@ -439,7 +439,7 @@ fn repair_wav_header(path: &std::path::Path) {
     if f.seek(SeekFrom::Start(40)).is_err() { return; }
     let _ = f.write_all(&new_data_size.to_le_bytes());
 
-    log::info!("repaired WAV header for {:?}: riff={} data={}", path, new_riff_size, new_data_size);
+    log::info!("repaired WAV header: riff={} data={}", new_riff_size, new_data_size);
 }
 
 /// Pause the current recording 

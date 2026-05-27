@@ -6,6 +6,7 @@ use crate::db::Database;
 use crate::calendar::google::{GoogleCalendar, OAuthTokens};
 use crate::calendar::microsoft::{MicrosoftCalendar, MsOAuthTokens};
 use crate::calendar::ics;
+use crate::calendar::pkce::{self, AuthChallenge};
 use crate::secrets::{self, SecretKey};
 
 #[tauri::command]
@@ -18,12 +19,30 @@ pub async fn start_google_oauth(
     let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
 
-    let auth_url = calendar.auth_url(port);
+    let challenge = AuthChallenge::new();
+    let auth_url = calendar.auth_url(port, &challenge);
 
     // Open browser
     let _ = open::that(&auth_url);
 
-    // Wait for callback (with timeout)
+    let code = await_oauth_callback(listener, &challenge).await?;
+
+    // Exchange code for tokens (PKCE: send the verifier we committed to)
+    let tokens = calendar.exchange_code(&code, port, &challenge.code_verifier).await.map_err(|e| e.to_string())?;
+
+    // Save tokens (Keychain)
+    let tokens_json = serde_json::to_string(&tokens).map_err(|e| e.to_string())?;
+    secrets::set(SecretKey::GoogleOAuthTokens, &tokens_json).map_err(|e| e.to_string())?;
+
+    Ok("Connected to Google Calendar".to_string())
+}
+
+/// Accept one inbound callback, parse code+state, verify state matches the
+/// challenge, send the browser a confirmation page, and return the code.
+async fn await_oauth_callback(
+    listener: TcpListener,
+    challenge: &AuthChallenge,
+) -> Result<String, String> {
     let (mut stream, _) = tokio::time::timeout(
         std::time::Duration::from_secs(120),
         listener.accept(),
@@ -43,33 +62,22 @@ pub async fn start_google_oauth(
     }
     let request = String::from_utf8_lossy(&buf);
 
-    // Parse code from query string
-    let code = request
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|path| {
-            url::Url::parse(&format!("http://localhost{}", path)).ok()
-        })
-        .and_then(|url| {
-            url.query_pairs()
-                .find(|(k, _)| k == "code")
-                .map(|(_, v)| v.to_string())
-        })
+    let (code, state) = pkce::parse_callback(&request)
         .ok_or("failed to parse auth code from callback")?;
 
-    // Send a response to the browser so the user sees confirmation
+    if state != challenge.state {
+        // State mismatch: someone else's request hit our localhost listener
+        // before the legitimate redirect. Refuse the code and surface the
+        // mismatch to the user — never exchange a code we didn't initiate.
+        let body = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n<html><body><h2>OAuth state mismatch</h2><p>This callback did not originate from Perchnote. Returning to the app.</p></body></html>";
+        let _ = stream.write_all(body.as_bytes()).await;
+        return Err("OAuth state mismatch (possible CSRF attempt)".to_string());
+    }
+
     let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html><body><h2>Connected!</h2><p>You can close this tab and return to Perchnote.</p></body></html>";
     let _ = stream.write_all(response.as_bytes()).await;
 
-    // Exchange code for tokens
-    let tokens = calendar.exchange_code(&code, port).await.map_err(|e| e.to_string())?;
-
-    // Save tokens (Keychain)
-    let tokens_json = serde_json::to_string(&tokens).map_err(|e| e.to_string())?;
-    secrets::set(SecretKey::GoogleOAuthTokens, &tokens_json).map_err(|e| e.to_string())?;
-
-    Ok("Connected to Google Calendar".to_string())
+    Ok(code)
 }
 
 #[tauri::command]
@@ -186,44 +194,13 @@ pub async fn start_microsoft_oauth(
     let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
 
-    let auth_url = calendar.auth_url(port);
+    let challenge = AuthChallenge::new();
+    let auth_url = calendar.auth_url(port, &challenge);
     let _ = open::that(&auth_url);
 
-    let (mut stream, _) = tokio::time::timeout(
-        std::time::Duration::from_secs(120),
-        listener.accept(),
-    )
-    .await
-    .map_err(|_| "OAuth timed out after 2 minutes".to_string())?
-    .map_err(|e| e.to_string())?;
+    let code = await_oauth_callback(listener, &challenge).await?;
 
-    let mut buf = Vec::new();
-    let mut tmp = [0u8; 512];
-    loop {
-        let n = stream.read(&mut tmp).await.map_err(|e| e.to_string())?;
-        if n == 0 { break; }
-        buf.extend_from_slice(&tmp[..n]);
-        if buf.windows(4).any(|w| w == b"\r\n\r\n") { break; }
-        if buf.len() > 65_536 { break; } // safety limit
-    }
-    let request = String::from_utf8_lossy(&buf);
-
-    let code = request
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|path| url::Url::parse(&format!("http://localhost{}", path)).ok())
-        .and_then(|url| {
-            url.query_pairs()
-                .find(|(k, _)| k == "code")
-                .map(|(_, v)| v.to_string())
-        })
-        .ok_or("failed to parse auth code from callback")?;
-
-    let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html><body><h2>Connected!</h2><p>You can close this tab and return to Perchnote.</p></body></html>";
-    let _ = stream.write_all(response.as_bytes()).await;
-
-    let tokens = calendar.exchange_code(&code, port).await.map_err(|e| e.to_string())?;
+    let tokens = calendar.exchange_code(&code, port, &challenge.code_verifier).await.map_err(|e| e.to_string())?;
     let tokens_json = serde_json::to_string(&tokens).map_err(|e| e.to_string())?;
     secrets::set(SecretKey::MicrosoftOAuthTokens, &tokens_json).map_err(|e| e.to_string())?;
 

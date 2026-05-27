@@ -321,7 +321,7 @@ impl WhisperSidecar {
                                 config.gpu_enabled,
                                 config.custom_vocabulary.as_deref(),
                             ).await {
-                                log::info!("whisper: final: {}", text);
+                                log::info!("whisper: final segment ({} chars)", text.len());
                                 speaker_ctx.last_segment_end_ms = elapsed_ms + duration_ms;
                                 let _ = segment_tx.send(TranscriptSegment {
                                     text,
@@ -418,7 +418,7 @@ impl WhisperSidecar {
                             vocab.as_deref(),
                         ).await {
                             Some(text) => {
-                                log::info!("whisper [{}ms]: {}", current_ms, text);
+                                log::info!("whisper [{}ms]: {} chars", current_ms, text.len());
                                 let _ = tx.send(TranscriptSegment {
                                     text,
                                     start_ms: current_ms,

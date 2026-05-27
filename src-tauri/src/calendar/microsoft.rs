@@ -124,20 +124,24 @@ impl MicrosoftCalendar {
             || db.get_setting("microsoft_client_id").ok().flatten().is_some()
     }
 
-    /// Generate the OAuth authorization URL
-    pub fn auth_url(&self, redirect_port: u16) -> String {
+    /// Generate the OAuth authorization URL with `state` (CSRF protection) and
+    /// the PKCE `code_challenge` bound to this flow.
+    pub fn auth_url(&self, redirect_port: u16, challenge: &super::pkce::AuthChallenge) -> String {
         let redirect_uri = format!("http://localhost:{}/callback", redirect_port);
         format!(
-            "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&response_mode=query",
+            "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&response_mode=query&state={}&code_challenge={}&code_challenge_method=S256",
             AUTH_URL,
             urlencoding::encode(&self.client_id),
             urlencoding::encode(&redirect_uri),
             urlencoding::encode(SCOPE),
+            urlencoding::encode(&challenge.state),
+            urlencoding::encode(&challenge.code_challenge),
         )
     }
 
-    /// Exchange authorization code for tokens
-    pub async fn exchange_code(&self, code: &str, redirect_port: u16) -> Result<MsOAuthTokens> {
+    /// Exchange authorization code for tokens. `code_verifier` must match the
+    /// `code_challenge` sent to `auth_url` for this flow.
+    pub async fn exchange_code(&self, code: &str, redirect_port: u16, code_verifier: &str) -> Result<MsOAuthTokens> {
         let redirect_uri = format!("http://localhost:{}/callback", redirect_port);
         let resp = self.client
             .post(TOKEN_URL)
@@ -148,6 +152,7 @@ impl MicrosoftCalendar {
                 ("redirect_uri", &redirect_uri),
                 ("grant_type", "authorization_code"),
                 ("scope", SCOPE),
+                ("code_verifier", code_verifier),
             ])
             .send()
             .await?

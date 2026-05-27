@@ -3020,6 +3020,7 @@ name = "perchnote"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "cpal",
  "env_logger",
@@ -3036,6 +3037,7 @@ dependencies = [
  "rusqlite_migration",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-notification",

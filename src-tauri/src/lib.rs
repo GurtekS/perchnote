@@ -273,7 +273,7 @@ pub fn run() {
                                     .show();
 
                                 let _ = app_handle.emit("meeting-starting-soon", meeting);
-                                log::info!("notification: sent for meeting {}", meeting.title);
+                                log::info!("notification: sent for meeting {}", meeting.id);
                             }
                         }
                     }
