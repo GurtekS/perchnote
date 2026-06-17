@@ -92,7 +92,10 @@ function resolveTheme(theme: Theme): "dark" | "light" {
 
 /** Default accent per resolved theme — must match globals.css */
 const THEME_ACCENT_DEFAULTS: Record<"dark" | "light", string> = {
-  dark: "#6366f1",
+  // 2026 rehaul: the brand is the perch green in both themes (brightened
+  // for dark so it carries on deep surfaces). A user-picked accent still
+  // overrides both.
+  dark: "#5fb877",
   light: "#4a8c5a",
 };
 

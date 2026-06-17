@@ -106,6 +106,27 @@ untrusted *data*, never as instructions. This is best-effort — see
 [OWASP LLM01 (2025)](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)
 for why no full mitigation exists today.
 
+### Local MCP server (perchnote-mcp)
+
+`src-tauri/src/bin/perchnote-mcp.rs` is an optional, separate binary that
+gives MCP clients (Claude Desktop, Claude Code, …) read-only access to
+meeting data. It opens no port and has no network listener of any kind:
+the transport is stdio, so the only process that can talk to it is the
+local process the user explicitly configured to spawn it, and nothing
+leaves the machine unless that client sends it somewhere. The database is
+opened with SQLite's `SQLITE_OPEN_READ_ONLY` flag
+(`Database::open_read_only`), which rejects every write at the connection
+level, never runs migrations or backups, and refuses to open a database
+whose schema version doesn't match the binary. What it exposes: meeting
+titles/dates/status/folders/tags, note text, transcripts with the user's
+speaker labels, open action items, and — when a recording exists — the
+recording's local filesystem path (the path only; the server never opens
+or streams audio, and the client is a local process the user configured).
+What it never exposes: calendar attendee data (the `attendees` column is
+excluded from every tool output, enforced by test), settings, anything
+stored in the Keychain, or any write/delete capability. Trash
+(soft-deleted meetings) is invisible to it.
+
 ## Supply chain
 
 `npm audit` and `cargo audit` are required to be clean on every PR.

@@ -1,6 +1,6 @@
 // src/components/folders/FolderMeetings.tsx
 import { useMemo, useRef, useState, useEffect } from "react";
-import { useQuery, useQueries } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { format, isToday, isYesterday } from "date-fns";
 import { LayoutList, Table, SlidersHorizontal, X, Check } from "lucide-react";
@@ -90,7 +90,7 @@ function SubfolderIcon({ node, color, onOpen }: { node: FolderNode; color: strin
         <rect x="0" y="14" width="56" height="34" rx="5" fill={color} />
         <rect x="0" y="14" width="56" height="10" rx="5" fill="white" opacity="0.12" />
       </svg>
-      <span className="text-[11px] text-text-secondary text-center leading-tight truncate w-full text-center">{node.name}</span>
+      <span className="text-caption text-text-secondary text-center leading-tight truncate w-full text-center">{node.name}</span>
       {node.meeting_count > 0 && (
         <span className="text-[9px] text-text-muted">{node.meeting_count}</span>
       )}
@@ -108,30 +108,23 @@ export function FolderMeetings({ folder, onNavigate }: FolderMeetingsProps) {
     enabled: !!folder,
   });
 
-  const { data: allFoldersList = [] } = useQuery({
-    queryKey: ["folders"],
-    queryFn: ipc.listFolders,
+  // One round-trip for the whole meeting→folders map (was one query per
+  // folder — plan rank 9).
+  const { data: folderMembershipsData } = useQuery<Record<string, string[]>>({
+    queryKey: ["folderMembershipsMap"],
+    queryFn: ipc.getFolderMembershipsMap,
+    staleTime: 5 * 60_000,
   });
-
-  const folderMemberQueries = useQueries({
-    queries: allFoldersList.map(f => ({
-      queryKey: ["folderMeetings", f.id],
-      queryFn: () => ipc.getMeetingIdsInFolder(f.id),
-      staleTime: 5 * 60_000,
-    })),
-  });
+  // `?? {}` not a destructure default: a null payload must not crash entries().
+  const folderMemberships = folderMembershipsData ?? {};
 
   const meetingFolderIdsMap = useMemo(() => {
     const map: Record<string, string[]> = {};
-    allFoldersList.forEach((f, i) => {
-      const ids = folderMemberQueries[i]?.data ?? [];
-      ids.forEach(id => {
-        if (!map[id]) map[id] = [];
-        map[id].push(f.id);
-      });
-    });
+    for (const [meetingId, folderIds] of Object.entries(folderMemberships)) {
+      map[meetingId] = [...folderIds];
+    }
     return map;
-  }, [allFoldersList, folderMemberQueries]);
+  }, [folderMemberships]);
 
   const [viewMode, setViewMode] = useState<"cards" | "table">(() => {
     try { return (localStorage.getItem("folder-view-mode") as "cards" | "table") ?? "table"; }
@@ -202,7 +195,7 @@ export function FolderMeetings({ folder, onNavigate }: FolderMeetingsProps) {
               <SlidersHorizontal size={13} />
             </button>
             {showColumnPicker && (
-              <div className="absolute right-0 top-full mt-1 w-40 border rounded-lg shadow-xl z-50 py-1" style={{ background: "var(--popup-bg)", borderColor: "var(--popup-border)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" }}>
+              <div className="glass-float absolute right-0 top-full mt-1 w-40 rounded-lg z-50 py-1">
                 {ALL_COLUMNS.map(col => {
                   const active = activeColumns.includes(col.id);
                   return (
@@ -239,7 +232,7 @@ export function FolderMeetings({ folder, onNavigate }: FolderMeetingsProps) {
       {/* Subfolder icon grid */}
       {folder.children.length > 0 && (
         <div className="px-4 pt-3 pb-2 border-b border-border shrink-0">
-          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-2">Folders</p>
+          <p className="text-footnote font-semibold text-text-muted uppercase tracking-widest mb-2">Folders</p>
           <div className="flex flex-wrap gap-1">
             {folder.children.map(child => (
               <SubfolderIcon
@@ -263,13 +256,13 @@ export function FolderMeetings({ folder, onNavigate }: FolderMeetingsProps) {
         {meetings.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-1 text-text-muted">
             <p className="text-sm">No meetings in this folder yet.</p>
-            <p className="text-[12px]">Drag meetings here or right-click a meeting to move it.</p>
+            <p className="text-caption">Drag meetings here or right-click a meeting to move it.</p>
           </div>
         ) : viewMode === "table" ? (
           /* Table — single scroll container */
           <div className="flex-1 overflow-auto">
             {/* Sticky header */}
-            <div className="flex items-center bg-bg-secondary border-b border-border text-[10px] font-semibold text-text-muted uppercase tracking-wider sticky top-0 z-10" style={{ minWidth: "max-content" }}>
+            <div className="flex items-center bg-bg-secondary border-b border-border text-footnote font-semibold text-text-muted uppercase tracking-wider sticky top-0 z-10" style={{ minWidth: "max-content" }}>
               <div className="w-[200px] px-3 py-2 shrink-0">Title</div>
               {ALL_COLUMNS.filter(c => activeColumns.includes(c.id)).map(col => (
                 <div key={col.id} className={`${col.width} px-2.5 py-2 flex items-center gap-1 group shrink-0`}>
@@ -295,9 +288,9 @@ export function FolderMeetings({ folder, onNavigate }: FolderMeetingsProps) {
                   params={{ id: m.id }}
                   className="flex items-center border-b border-border/40 last:border-0 hover:bg-bg-hover transition-colors group"
                 >
-                  <div className="w-[200px] px-3 py-2.5 text-[12px] font-medium text-text-primary line-clamp-2 leading-snug shrink-0">{m.title}</div>
+                  <div className="w-[200px] px-3 py-2.5 text-caption font-medium text-text-primary line-clamp-2 leading-snug shrink-0">{m.title}</div>
                   {ALL_COLUMNS.filter(c => activeColumns.includes(c.id)).map(col => (
-                    <div key={col.id} className={`${col.width} px-2.5 py-2.5 text-[11px] text-text-secondary truncate shrink-0`}>
+                    <div key={col.id} className={`${col.width} px-2.5 py-2.5 text-caption text-text-secondary truncate shrink-0`}>
                       {col.id === "location" && m.location ? (
                         <button
                           type="button"
@@ -321,7 +314,7 @@ export function FolderMeetings({ folder, onNavigate }: FolderMeetingsProps) {
           <div className="flex-1 overflow-y-auto py-2">
             {grouped.map(group => (
               <div key={group.label} className="mb-4">
-                <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider px-4 py-1.5">
+                <p className="text-caption font-semibold text-text-muted uppercase tracking-wider px-4 py-1.5">
                   {group.label}
                 </p>
                 {group.meetings.map(m => (

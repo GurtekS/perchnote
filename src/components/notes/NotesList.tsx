@@ -1,59 +1,40 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, isToday, isYesterday, isTomorrow } from "date-fns";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowDownUp, CalendarX, Search as SearchIcon, LayoutList, Table as TableIcon, SlidersHorizontal, X, Check } from "lucide-react";
+import { ArrowDownUp, CalendarX, Search as SearchIcon, LayoutList, Table as TableIcon, SlidersHorizontal, Tag as TagIcon, X, Check } from "lucide-react";
 import { ipc, Meeting, Folder, SearchResult, openLocation, isLocationUrl } from "../../lib/ipc";
-
-/** Extract plain text from TipTap JSON, up to maxChars characters. */
-function extractPlainText(rawContent: string, maxChars = 140): string {
-  try {
-    const doc = JSON.parse(rawContent);
-    const parts: string[] = [];
-
-    function traverse(node: Record<string, unknown>) {
-      if (node.type === "text" && typeof node.text === "string") {
-        parts.push(node.text);
-        return;
-      }
-      const children = node.content as Array<Record<string, unknown>> | undefined;
-      if (children) {
-        for (const child of children) {
-          traverse(child);
-        }
-        if (["paragraph", "heading", "blockquote"].includes(node.type as string)) {
-          parts.push(" ");
-        }
-      }
-    }
-
-    traverse(doc);
-    const text = parts.join("").replace(/\s+/g, " ").trim();
-    return text.length > maxChars ? text.slice(0, maxChars) + "…" : text;
-  } catch {
-    return "";
-  }
-}
-
 import { NoteCard } from "./NoteCard";
 import { SearchBar } from "./SearchBar";
 import { MeetingCardSkeleton } from "../shared/Skeleton";
 
 interface NotesListProps {
-  initialFolder?: string;
+  /** Exact tag name from the /meetings `tag` search param (tags read path). */
+  initialTag?: string;
 }
 
 type ColumnId = "date" | "time" | "duration" | "attendees" | "location" | "folder" | "platform";
+/** "title" is the fixed leading column; the rest are user-toggleable. Both
+ *  are resizable, so widths are keyed by this union. */
+type WidthKey = ColumnId | "title";
 
-const ALL_COLUMNS: { id: ColumnId; label: string; width: string }[] = [
-  { id: "date", label: "Date", width: "w-24" },
-  { id: "time", label: "Time", width: "w-20" },
-  { id: "duration", label: "Dur", width: "w-16" },
-  { id: "attendees", label: "Attendees", width: "w-40" },
-  { id: "location", label: "Location", width: "w-28" },
-  { id: "folder", label: "Folder", width: "w-24" },
-  { id: "platform", label: "Platform", width: "w-20" },
+const ALL_COLUMNS: { id: ColumnId; label: string; defaultWidth: number }[] = [
+  { id: "date", label: "Date", defaultWidth: 96 },
+  { id: "time", label: "Time", defaultWidth: 80 },
+  { id: "duration", label: "Dur", defaultWidth: 64 },
+  { id: "attendees", label: "Attendees", defaultWidth: 160 },
+  { id: "location", label: "Location", defaultWidth: 112 },
+  { id: "folder", label: "Folder", defaultWidth: 96 },
+  { id: "platform", label: "Platform", defaultWidth: 80 },
 ];
+
+const TITLE_DEFAULT_WIDTH = 200;
+const MIN_COLUMN_WIDTH = 56;
+/** Default px width for any resizable column, by key. */
+const DEFAULT_WIDTHS: Record<WidthKey, number> = {
+  title: TITLE_DEFAULT_WIDTH,
+  ...Object.fromEntries(ALL_COLUMNS.map((c) => [c.id, c.defaultWidth])),
+} as Record<WidthKey, number>;
 
 type SortOption = "newest" | "oldest" | "title" | "duration";
 
@@ -72,12 +53,12 @@ function getDayLabel(dateStr: string): string {
   return format(d, "EEE, MMM d");
 }
 
-export function NotesList({ initialFolder }: NotesListProps) {
+export function NotesList({ initialTag }: NotesListProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(initialFolder ?? null);
+  const [tagFilter, setTagFilter] = useState<string | null>(initialTag ?? null);
   const [sortBy, setSortBy] = useState<SortOption>("newest");
   const [showSortMenu, setShowSortMenu] = useState(false);
   const sortMenuRef = useRef<HTMLDivElement>(null);
@@ -99,6 +80,66 @@ export function NotesList({ initialFolder }: NotesListProps) {
   useEffect(() => {
     localStorage.setItem("notes-table-columns", JSON.stringify(activeColumns));
   }, [activeColumns]);
+  // Per-column widths (px), drag-resizable from each header's right edge and
+  // persisted like the column selection. Unknown/legacy keys fall back to the
+  // defaults so adding a column later can't read as 0-width.
+  const [columnWidths, setColumnWidths] = useState<Record<WidthKey, number>>(() => {
+    try {
+      const saved = localStorage.getItem("notes-table-widths");
+      if (saved) return { ...DEFAULT_WIDTHS, ...JSON.parse(saved) };
+    } catch {}
+    return { ...DEFAULT_WIDTHS };
+  });
+  useEffect(() => {
+    localStorage.setItem("notes-table-widths", JSON.stringify(columnWidths));
+  }, [columnWidths]);
+
+  // Active drag — captured on the handle so moves track even past the cell.
+  const resizeRef = useRef<{ key: WidthKey; startX: number; startWidth: number } | null>(null);
+  const widthOf = (key: WidthKey) => columnWidths[key] ?? DEFAULT_WIDTHS[key];
+  const setWidth = useCallback((key: WidthKey, px: number) => {
+    setColumnWidths((prev) => ({ ...prev, [key]: Math.max(MIN_COLUMN_WIDTH, Math.round(px)) }));
+  }, []);
+  const onResizeDown = (key: WidthKey) => (e: React.PointerEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizeRef.current = { key, startX: e.clientX, startWidth: widthOf(key) };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onResizeMove = (e: React.PointerEvent<HTMLElement>) => {
+    const r = resizeRef.current;
+    if (!r) return;
+    setWidth(r.key, r.startWidth + (e.clientX - r.startX));
+  };
+  const onResizeUp = (e: React.PointerEvent<HTMLElement>) => {
+    if (!resizeRef.current) return;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    resizeRef.current = null;
+  };
+
+  // A thin grip on the cell's right edge. Keyboard-resizable (the a11y track
+  // keeps every control reachable); double-click resets the column.
+  const renderResizer = (key: WidthKey, label: string) => (
+    <span
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={`Resize ${label} column`}
+      tabIndex={0}
+      title="Drag to resize · double-click to reset"
+      onPointerDown={onResizeDown(key)}
+      onPointerMove={onResizeMove}
+      onPointerUp={onResizeUp}
+      onDoubleClick={() => setWidth(key, DEFAULT_WIDTHS[key])}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          e.preventDefault();
+          setWidth(key, widthOf(key) + (e.key === "ArrowLeft" ? -16 : 16));
+        }
+      }}
+      className="absolute right-0 top-0 z-10 h-full w-1.5 cursor-col-resize touch-none select-none bg-transparent transition-colors hover:bg-accent/40 focus-visible:bg-accent/60"
+    />
+  );
+
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const columnPickerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -113,8 +154,8 @@ export function NotesList({ initialFolder }: NotesListProps) {
   }, [showColumnPicker]);
 
   useEffect(() => {
-    setSelectedFolder(initialFolder ?? null);
-  }, [initialFolder]);
+    setTagFilter(initialTag ?? null);
+  }, [initialTag]);
 
   const handleSearchChange = useCallback((value: string) => {
     setSearch(value);
@@ -146,76 +187,80 @@ export function NotesList({ initialFolder }: NotesListProps) {
     queryFn: ipc.listMeetings,
   });
 
-  const { data: folderMeetingIds } = useQuery({
-    queryKey: ["folderMeetings", selectedFolder],
-    queryFn: () => ipc.getMeetingIdsInFolder(selectedFolder!),
-    enabled: !!selectedFolder,
-  });
-
   const { data: folders = [] } = useQuery<Folder[]>({
     queryKey: ["folders"],
     queryFn: ipc.listFolders,
     staleTime: 5 * 60_000,
   });
 
-  const folderMemberQueries = useQueries({
-    queries: folders.map((f) => ({
-      queryKey: ["folderMeetings", f.id],
-      queryFn: () => ipc.getMeetingIdsInFolder(f.id),
-      staleTime: 5 * 60_000,
-    })),
+  // One round-trip for the whole meeting→folders map (was one query per
+  // folder — plan rank 9). Key invalidated alongside "folderMeetings".
+  const { data: folderMembershipsData } = useQuery<Record<string, string[]>>({
+    queryKey: ["folderMembershipsMap"],
+    queryFn: ipc.getFolderMembershipsMap,
+    staleTime: 5 * 60_000,
   });
+  // `?? {}` not a destructure default: a null payload must not crash entries().
+  const folderMemberships = folderMembershipsData ?? {};
 
   const meetingFolderMap = useMemo(() => {
     const map: Record<string, Folder> = {};
-    folders.forEach((folder, i) => {
-      const ids = folderMemberQueries[i]?.data ?? [];
-      ids.forEach((id) => { map[id] = folder; });
-    });
+    // Same precedence as before: later folders in list order win.
+    for (const folder of folders) {
+      for (const [meetingId, folderIds] of Object.entries(folderMemberships)) {
+        if (folderIds.includes(folder.id)) map[meetingId] = folder;
+      }
+    }
     return map;
-  }, [folders, folderMemberQueries]);
+  }, [folders, folderMemberships]);
 
   const meetingFolderIdsMap = useMemo(() => {
     const map: Record<string, string[]> = {};
-    folders.forEach((folder, i) => {
-      const ids = folderMemberQueries[i]?.data ?? [];
-      ids.forEach(id => {
-        if (!map[id]) map[id] = [];
-        map[id].push(folder.id);
-      });
-    });
+    for (const [meetingId, folderIds] of Object.entries(folderMemberships)) {
+      map[meetingId] = [...folderIds];
+    }
     return map;
-  }, [folders, folderMemberQueries]);
+  }, [folderMemberships]);
 
+  // Keyword + semantic recall in ONE round-trip, fused server-side with
+  // rrf_fuse at meeting level (plan v9 #10 — replaces the searchAll +
+  // semanticSearch pair merged client-side). Meetings only meaning-search
+  // found ("how much can we spend" → the budget discussion) arrive as one
+  // match_source "semantic" row ("Related:"), still carrying match_start_ms
+  // for click-to-seek (plan v8 A4). With embeddings off the payload is
+  // exactly searchAll's, so this stays invisible until semantic recall is on.
   const { data: searchResults } = useQuery({
-    queryKey: ["searchAll", debouncedSearch],
-    queryFn: () => ipc.searchAll(debouncedSearch, 50),
+    queryKey: ["searchWithSemantic", debouncedSearch],
+    queryFn: () => ipc.searchWithSemantic(debouncedSearch, 50),
     enabled: debouncedSearch.length >= 2,
+    staleTime: 30_000,
   });
 
+  const meetingIds = useMemo(
+    () => meetings.map((m: { id: string }) => m.id),
+    [meetings]
+  );
   const { data: meetingTagsMap = {} } = useQuery({
-    queryKey: ["meetingTags", meetings.map((m: { id: string }) => m.id).join(",")],
+    queryKey: ["meetingTags", meetingIds],
     queryFn: async () => {
+      const tagsByMeeting = await ipc.getTagsForMeetings(meetingIds);
       const map: Record<string, string[]> = {};
-      await Promise.all(
-        meetings.map(async (m: { id: string }) => {
-          const t = await ipc.getMeetingTags(m.id);
-          map[m.id] = t.map((x: { name: string }) => x.name);
-        })
-      );
+      for (const [id, tags] of Object.entries(tagsByMeeting)) {
+        map[id] = tags.map((t) => t.name);
+      }
       return map;
     },
-    enabled: meetings.length > 0,
+    enabled: meetingIds.length > 0,
   });
 
+  // Best row per meeting for the card subline. Rows arrive grouped by
+  // meeting in fused order, so first-wins preserves search_all's arm
+  // precedence (title, then transcript, then notes) and "semantic" rows
+  // only exist for meetings keyword search missed.
   const searchResultMap = useMemo(() => {
     const map: Record<string, SearchResult> = {};
-    if (searchResults) {
-      for (const r of searchResults) {
-        if (!map[r.meeting_id]) {
-          map[r.meeting_id] = r;
-        }
-      }
+    for (const r of searchResults ?? []) {
+      if (!map[r.meeting_id]) map[r.meeting_id] = r;
     }
     return map;
   }, [searchResults]);
@@ -242,6 +287,7 @@ export function NotesList({ initialFolder }: NotesListProps) {
     let list = meetings.filter((m: Meeting) => m.status !== "upcoming");
 
     if (debouncedSearch.length >= 2 && searchResults) {
+      // Fused results already include the semantic-only meetings.
       const matchedIds = new Set(searchResults.map((r: SearchResult) => r.meeting_id));
       list = list.filter((m: { id: string }) => matchedIds.has(m.id));
     } else if (search) {
@@ -250,8 +296,10 @@ export function NotesList({ initialFolder }: NotesListProps) {
       );
     }
 
-    if (selectedFolder && folderMeetingIds) {
-      list = list.filter((m: { id: string }) => folderMeetingIds.includes(m.id));
+    // Tags read path (discoverability batch): exact tag-name match, set by
+    // the /meetings?tag= param and removable via the header chip.
+    if (tagFilter) {
+      list = list.filter((m: { id: string }) => (meetingTagsMap[m.id] ?? []).includes(tagFilter));
     }
 
     return [...list].sort((a, b) => {
@@ -282,7 +330,7 @@ export function NotesList({ initialFolder }: NotesListProps) {
         }
       }
     });
-  }, [meetings, search, debouncedSearch, searchResults, selectedFolder, folderMeetingIds, sortBy]);
+  }, [meetings, search, debouncedSearch, searchResults, tagFilter, meetingTagsMap, sortBy]);
 
   // Group past meetings by day
   const grouped = useMemo(() => {
@@ -301,25 +349,24 @@ export function NotesList({ initialFolder }: NotesListProps) {
     return groups;
   }, [filtered]);
 
-  const notePreviewQueries = useQueries({
-    queries: filtered.map((m) => ({
-      queryKey: ["note", m.id],
-      queryFn: () => ipc.getNoteByMeeting(m.id),
-      staleTime: 5 * 60_000,
-    })),
+  // ONE round-trip for every preview line. The old useQueries fan-out made
+  // a per-meeting IPC call returning both full note bodies — the entire
+  // notes corpus crossed the bridge on every home visit (lifetime #18).
+  const { data: notePreviews } = useQuery({
+    queryKey: ["note-previews"],
+    queryFn: ipc.listNotePreviews,
+    // One cheap call per home visit keeps previews honest after edits
+    // (QA audit finding 7: nothing invalidates this key on note saves).
+    refetchOnMount: "always",
   });
 
   const meetingNotePreviewMap = useMemo(() => {
     const map: Record<string, string> = {};
-    filtered.forEach((m, i) => {
-      const raw = notePreviewQueries[i]?.data?.raw_content;
-      if (raw) {
-        const text = extractPlainText(raw, 140);
-        if (text) map[m.id] = text;
-      }
-    });
+    for (const p of notePreviews ?? []) {
+      map[p.meeting_id] = p.preview;
+    }
     return map;
-  }, [filtered, notePreviewQueries]);
+  }, [notePreviews]);
 
   const isSearchActive = debouncedSearch.length >= 2;
 
@@ -396,7 +443,7 @@ export function NotesList({ initialFolder }: NotesListProps) {
                   <SlidersHorizontal size={13} />
                 </button>
                 {showColumnPicker && (
-                  <div className="absolute right-0 top-full mt-1 w-40 border rounded-lg shadow-xl z-50 py-1" style={{ background: "var(--popup-bg)", borderColor: "var(--popup-border)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" }}>
+                  <div className="glass-float absolute right-0 top-full mt-1 w-40 rounded-lg z-50 py-1">
                     {ALL_COLUMNS.map(col => {
                       const active = activeColumns.includes(col.id);
                       return (
@@ -434,7 +481,7 @@ export function NotesList({ initialFolder }: NotesListProps) {
                 )}
               </button>
               {showSortMenu && (
-                <div className="menu-dropdown absolute right-0 top-full mt-1 w-36 border rounded-lg shadow-xl z-50 py-1" style={{ background: "var(--popup-bg)", borderColor: "var(--popup-border)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" }}>
+                <div className="glass-float menu-dropdown absolute right-0 top-full mt-1 w-36 rounded-lg z-50 py-1">
                   {sortLabels.map((s) => (
                     <button
                       type="button"
@@ -455,11 +502,38 @@ export function NotesList({ initialFolder }: NotesListProps) {
             </div>
           </div>
         </div>
-        {isSearchActive && searchResults && (
-          <p className="text-[11px] text-text-muted mt-2">
-            {searchResults.length} result{searchResults.length !== 1 ? "s" : ""}
-          </p>
+        {/* Active tag filter — removable here, set by tag chips elsewhere */}
+        {tagFilter && (
+          <div className="mt-2 flex items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-footnote text-text-secondary">
+              <TagIcon size={9} className="shrink-0" />
+              {tagFilter}
+              <button
+                type="button"
+                onClick={() => {
+                  setTagFilter(null);
+                  navigate({ to: "/meetings", search: {} });
+                }}
+                className="ml-0.5 rounded text-text-muted hover:text-text-primary transition-colors"
+                title="Remove tag filter"
+                aria-label={`Stop filtering by tag ${tagFilter}`}
+              >
+                <X size={10} />
+              </button>
+            </span>
+          </div>
         )}
+        {isSearchActive && searchResults && (() => {
+          // Fused results carry up to one row per arm per meeting (A3 v2)
+          // plus one "semantic" row per keyword-missed meeting; this list
+          // shows meetings, so count those.
+          const n = new Set(searchResults.map((r: SearchResult) => r.meeting_id)).size;
+          return (
+            <p className="text-caption text-text-muted mt-2">
+              {n} meeting{n !== 1 ? "s" : ""}
+            </p>
+          );
+        })()}
       </div>
 
       {/* Content area — flex-1 so it fills remaining height */}
@@ -470,20 +544,31 @@ export function NotesList({ initialFolder }: NotesListProps) {
               <MeetingCardSkeleton key={i} />
             ))}
           </div>
-        ) : filtered.length === 0 && upcomingMeetings.length === 0 ? (
+        ) : filtered.length === 0 && (!!tagFilter || upcomingMeetings.length === 0) ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
             <div className="empty-state-icon">
-              {search ? <SearchIcon size={18} /> : <CalendarX size={18} />}
+              {search || tagFilter ? <SearchIcon size={18} /> : <CalendarX size={18} />}
             </div>
             <p className="text-sm font-medium text-text-secondary">
-              {search ? "No matching meetings" : "No meetings yet"}
+              {search || tagFilter ? "No matching meetings" : "No meetings yet"}
             </p>
             <p className="text-xs text-text-muted mt-0.5">
               {search
                 ? "Try a different search term"
+                : tagFilter
+                ? `No meetings tagged \u201c${tagFilter}\u201d`
                 : "Press \u2318N to start your first meeting"}
             </p>
-            {!search && (
+            {/* First-five-minutes value (plan v10 #6): the import pipeline
+                makes a real transcribed meeting out of any recording the
+                user already has \u2014 say so where the emptiness is felt. */}
+            {!search && !tagFilter && (
+              <p className="text-xs text-text-muted">
+                or drop an audio file here \u2014 a Voice Memo, a call recording \u2014
+                and it becomes a transcribed meeting
+              </p>
+            )}
+            {!search && !tagFilter && (
               <button
                 onClick={async () => {
                   try {
@@ -501,9 +586,9 @@ export function NotesList({ initialFolder }: NotesListProps) {
         ) : (
           <>
             {/* Coming up — pinned above scroll area, card view only */}
-            {!isSearchActive && upcomingMeetings.length > 0 && viewMode === "cards" && (
+            {!isSearchActive && !tagFilter && upcomingMeetings.length > 0 && viewMode === "cards" && (
               <div className="shrink-0 px-4 pt-2 pb-3 border-b border-border/50">
-                <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider pb-1.5">
+                <p className="text-caption font-semibold text-text-muted uppercase tracking-wider pb-1.5">
                   Coming up
                 </p>
                 <div className="space-y-1">
@@ -523,8 +608,8 @@ export function NotesList({ initialFolder }: NotesListProps) {
                           <div className="text-[9px] text-text-muted">{format(d, "EEE")}</div>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-[13px] font-medium text-text-primary truncate">{m.title}</p>
-                          <p className="text-[11px] text-text-muted mt-0.5">
+                          <p className="text-body-sm font-medium text-text-primary truncate">{m.title}</p>
+                          <p className="text-caption text-text-muted mt-0.5">
                             {format(d, "h:mm a")}{end ? ` – ${format(end, "h:mm a")}` : ""}
                           </p>
                         </div>
@@ -539,20 +624,24 @@ export function NotesList({ initialFolder }: NotesListProps) {
               /* Table — single overflow-auto handles both scroll axes */
               <div className="flex-1 overflow-auto">
                 {/* Sticky header */}
-                <div className="flex items-center bg-bg-secondary border-b border-border text-[10px] font-semibold text-text-muted uppercase tracking-wider sticky top-0 z-10" style={{ minWidth: "max-content" }}>
-                  <div className="w-[200px] px-3 py-2 shrink-0">Title</div>
+                <div className="flex items-center bg-bg-secondary border-b border-border text-footnote font-semibold text-text-muted uppercase tracking-wider sticky top-0 z-10" style={{ minWidth: "max-content" }}>
+                  <div className="relative px-3 py-2 shrink-0" style={{ width: widthOf("title") }}>
+                    Title
+                    {renderResizer("title", "Title")}
+                  </div>
                   {ALL_COLUMNS.filter(c => activeColumns.includes(c.id)).map(col => (
-                    <div key={col.id} className={`${col.width} px-2.5 py-2 flex items-center gap-1 group shrink-0`}>
-                      {col.label}
+                    <div key={col.id} className="relative px-2.5 py-2 flex items-center gap-1 group shrink-0" style={{ width: widthOf(col.id) }}>
+                      <span className="truncate">{col.label}</span>
                       <button
                         type="button"
                         onClick={() => setActiveColumns(prev => prev.filter(id => id !== col.id))}
-                        className="ml-auto rounded text-text-muted opacity-0 transition-opacity hover:text-text-primary focus:opacity-100 group-hover:opacity-60 group-focus-within:opacity-60"
+                        className="ml-auto mr-1.5 rounded text-text-muted opacity-0 transition-opacity hover:text-text-primary focus:opacity-100 group-hover:opacity-60 group-focus-within:opacity-60"
                         title={`Remove ${col.label}`}
                         aria-label={`Remove ${col.label} column`}
                       >
                         <X size={9} />
                       </button>
+                      {renderResizer(col.id, col.label)}
                     </div>
                   ))}
                 </div>
@@ -565,9 +654,9 @@ export function NotesList({ initialFolder }: NotesListProps) {
                       params={{ id: m.id }}
                       className="flex items-center border-b border-border/40 last:border-0 hover:bg-bg-hover transition-colors group"
                     >
-                      <div className="w-[200px] px-3 py-2.5 text-[12px] font-medium text-text-primary line-clamp-2 leading-snug shrink-0">{m.title}</div>
+                      <div className="px-3 py-2.5 text-caption font-medium text-text-primary line-clamp-2 leading-snug shrink-0" style={{ width: widthOf("title") }}>{m.title}</div>
                       {ALL_COLUMNS.filter(c => activeColumns.includes(c.id)).map(col => (
-                        <div key={col.id} className={`${col.width} px-2.5 py-2.5 text-[11px] text-text-secondary truncate shrink-0`}>
+                        <div key={col.id} className="px-2.5 py-2.5 text-caption text-text-secondary truncate shrink-0" style={{ width: widthOf(col.id) }}>
                           {col.id === "location" && m.location ? (
                             <button
                               type="button"
@@ -591,7 +680,7 @@ export function NotesList({ initialFolder }: NotesListProps) {
               <div className="flex-1 overflow-y-auto px-2 pb-6">
                 {grouped.map((group) => (
                   <div key={group.label} className="mb-4">
-                    <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider px-4 py-1.5">
+                    <p className="text-caption font-semibold text-text-muted uppercase tracking-wider px-4 py-1.5">
                       {group.label}
                     </p>
                     <div>

@@ -3,11 +3,17 @@ import { NodeViewWrapper, NodeViewProps } from "@tiptap/react";
 import { formatDeadline } from "./formatDeadline";
 
 export function ActionItemView({ node, updateAttributes }: NodeViewProps) {
-  const { task, assignee, deadline, done } = node.attrs as {
+  const { task, assignee, deadline, done, source_start_ms } = node.attrs as {
     task: string;
     assignee: string | null;
     deadline: string | null;
     done: boolean;
+    source_start_ms: number | null;
+  };
+
+  const formatMs = (ms: number) => {
+    const totalSec = Math.floor(ms / 1000);
+    return `${Math.floor(totalSec / 60)}:${(totalSec % 60).toString().padStart(2, "0")}`;
   };
 
   return (
@@ -50,6 +56,22 @@ export function ActionItemView({ node, updateAttributes }: NodeViewProps) {
         <span className="tiptap-action-item__date" contentEditable={false}>
           {formatDeadline(deadline)}
         </span>
+      )}
+      {typeof source_start_ms === "number" && (
+        <button
+          type="button"
+          contentEditable={false}
+          className="tiptap-action-item__source"
+          title="Hear this moment in the recording"
+          onClick={(e) => {
+            e.preventDefault();
+            window.dispatchEvent(
+              new CustomEvent("seek-audio", { detail: { ms: source_start_ms } }),
+            );
+          }}
+        >
+          ▸ {formatMs(source_start_ms)}
+        </button>
       )}
     </NodeViewWrapper>
   );

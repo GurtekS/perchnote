@@ -28,7 +28,7 @@ export function SearchBar({ value, onChange }: SearchBarProps) {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Search meetings..."
+        placeholder="Search meetings…"
         className="w-full pl-9 pr-8 py-2 bg-bg-secondary text-text-primary text-sm rounded-lg border border-border focus:outline-none focus:border-accent transition-colors duration-150"
       />
       {value && (

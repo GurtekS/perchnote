@@ -20,7 +20,8 @@ import {
   SettingsStatusBadge,
   SettingsSubsectionHeader,
   primarySettingsButtonClass,
-  secondarySettingsButtonClass,
+  primarySettingsButtonCompactClass,
+  secondarySettingsButtonCompactClass,
   settingsInputClass,
 } from "./settingsUi";
 
@@ -220,11 +221,11 @@ export function CalendarSettings() {
               <span className="text-sm text-text-primary">Google Calendar</span>
             </div>
             {isGoogleConnected ? (
-              <button onClick={handleGoogleDisconnect} className={`${secondarySettingsButtonClass} min-h-8 px-2.5 py-1 text-xs`}>
+              <button onClick={handleGoogleDisconnect} className={`${secondarySettingsButtonCompactClass}`}>
                 <Unlink size={10} />Disconnect
               </button>
             ) : (
-              <button onClick={() => setShowGoogleSetup(!showGoogleSetup)} className={`${primarySettingsButtonClass} min-h-8 px-2.5 py-1 text-xs`}>
+              <button onClick={() => setShowGoogleSetup(!showGoogleSetup)} className={`${primarySettingsButtonCompactClass}`}>
                 <Link2 size={10} />Connect
               </button>
             )}
@@ -246,7 +247,7 @@ export function CalendarSettings() {
               <input type="text" value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="Client ID" className={`${settingsInputClass} w-full`} autoComplete="off" />
               <input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder="Client Secret" className={`${settingsInputClass} w-full`} autoComplete="off" />
               <button onClick={handleGoogleConnect} disabled={isConnecting || (!hasGoogleCredentials && (!clientId || !clientSecret))} className={primarySettingsButtonClass} aria-busy={isConnecting}>
-                <Link2 size={12} />{isConnecting ? "Waiting for authorization..." : "Authorize"}
+                <Link2 size={12} />{isConnecting ? "Waiting for authorization…" : "Authorize"}
               </button>
             </div>
           )}
@@ -274,11 +275,11 @@ export function CalendarSettings() {
               <span className="text-sm text-text-primary">Microsoft Calendar</span>
             </div>
             {isMicrosoftConnected ? (
-              <button onClick={handleMicrosoftDisconnect} className={`${secondarySettingsButtonClass} min-h-8 px-2.5 py-1 text-xs`}>
+              <button onClick={handleMicrosoftDisconnect} className={`${secondarySettingsButtonCompactClass}`}>
                 <Unlink size={10} />Disconnect
               </button>
             ) : (
-              <button onClick={() => setShowMicrosoftSetup(!showMicrosoftSetup)} className={`${primarySettingsButtonClass} min-h-8 px-2.5 py-1 text-xs`}>
+              <button onClick={() => setShowMicrosoftSetup(!showMicrosoftSetup)} className={`${primarySettingsButtonCompactClass}`}>
                 <Link2 size={10} />Connect
               </button>
             )}
@@ -300,7 +301,7 @@ export function CalendarSettings() {
               <input type="text" value={msClientId} onChange={(e) => setMsClientId(e.target.value)} placeholder="Application (client) ID" className={`${settingsInputClass} w-full`} autoComplete="off" />
               <input type="password" value={msClientSecret} onChange={(e) => setMsClientSecret(e.target.value)} placeholder="Client Secret" className={`${settingsInputClass} w-full`} autoComplete="off" />
               <button onClick={handleMicrosoftConnect} disabled={isMsConnecting || (!hasMicrosoftCredentials && (!msClientId || !msClientSecret))} className={primarySettingsButtonClass} aria-busy={isMsConnecting}>
-                <Link2 size={12} />{isMsConnecting ? "Waiting for authorization..." : "Authorize"}
+                <Link2 size={12} />{isMsConnecting ? "Waiting for authorization…" : "Authorize"}
               </button>
             </div>
           )}
@@ -333,13 +334,13 @@ export function CalendarSettings() {
               <Calendar size={14} className="text-text-muted" />
               <span className="text-sm text-text-primary">ICS Feeds</span>
               {icsUrls.length > 0 && (
-                <span className="text-[11px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full">{icsUrls.length}</span>
+                <span className="text-caption bg-accent/10 text-accent px-1.5 py-0.5 rounded-full">{icsUrls.length}</span>
               )}
             </div>
             {icsUrls.length > 0 && (
-              <button onClick={handleSyncIcs} disabled={isSyncingIcs} className={`${secondarySettingsButtonClass} min-h-8 px-2.5 py-1 text-xs`} aria-busy={isSyncingIcs}>
+              <button onClick={handleSyncIcs} disabled={isSyncingIcs} className={`${secondarySettingsButtonCompactClass}`} aria-busy={isSyncingIcs}>
                 {isSyncingIcs ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-                {isSyncingIcs ? "Syncing..." : "Sync now"}
+                {isSyncingIcs ? "Syncing…" : "Sync now"}
               </button>
             )}
           </div>
@@ -354,7 +355,7 @@ export function CalendarSettings() {
           )}
 
           {icsSyncResult && (
-            <p className="text-[11px] text-accent">
+            <p className="text-caption text-accent">
               Last sync: {icsSyncResult.count} event{icsSyncResult.count !== 1 ? "s" : ""} at{" "}
               {icsSyncResult.time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </p>
@@ -373,10 +374,10 @@ export function CalendarSettings() {
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row">
-            <input type="url" value={icsUrl} onChange={(e) => setIcsUrl(e.target.value)} placeholder="https://calendar.google.com/calendar/ical/..." className={`${settingsInputClass} min-h-10 flex-1`} onKeyDown={(e) => e.key === "Enter" && handleAddIcs()} />
+            <input type="url" value={icsUrl} onChange={(e) => setIcsUrl(e.target.value)} placeholder="https://calendar.google.com/calendar/ical/…" className={`${settingsInputClass} min-h-10 flex-1`} onKeyDown={(e) => e.key === "Enter" && handleAddIcs()} />
             <button onClick={handleAddIcs} disabled={isAddingIcs || !icsUrl.trim()} className={primarySettingsButtonClass} aria-busy={isAddingIcs}>
               {isAddingIcs ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-              {isAddingIcs ? "Adding..." : "Add"}
+              {isAddingIcs ? "Adding…" : "Add"}
             </button>
           </div>
 
@@ -393,7 +394,7 @@ export function CalendarSettings() {
                     <Calendar size={12} className="text-accent shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-text-secondary truncate text-xs">{displayUrl}</p>
-                      <p className="text-text-muted text-[10px] truncate">{url}</p>
+                      <p className="text-text-muted text-footnote truncate">{url}</p>
                     </div>
                     <button onClick={() => handleRemoveIcs(url)} className="text-text-muted hover:text-recording transition-colors shrink-0" aria-label={`Remove calendar feed ${displayUrl}`}><Trash2 size={12} /></button>
                   </div>

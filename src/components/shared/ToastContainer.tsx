@@ -49,11 +49,9 @@ function ToastItem({ t, onRemove }: { t: Toast; onRemove: () => void }) {
 
   return (
     <div
-      className={`relative overflow-hidden rounded-xl border border-white/10 shadow-2xl
-        bg-[#1c1c1e] backdrop-blur-xl text-white
+      className={`glass-float relative overflow-hidden rounded-xl
         transition-all duration-200 ease-out w-80
         ${visible ? "opacity-100 translate-x-0" : "opacity-0 translate-x-6"}`}
-      role="alert"
     >
       {/* Subtle left accent strip */}
       <div className={`absolute left-0 top-3 bottom-3 w-[3px] rounded-full ${accentMap[t.type]} opacity-70`} />
@@ -63,15 +61,15 @@ function ToastItem({ t, onRemove }: { t: Toast; onRemove: () => void }) {
           {iconMap[t.type]}
           <div className="flex-1 min-w-0">
             {t.title && (
-              <p className="text-[12px] font-semibold text-white leading-tight mb-0.5">{t.title}</p>
+              <p className="text-caption font-semibold text-text-primary leading-tight mb-0.5">{t.title}</p>
             )}
-            <p className={`text-[12px] leading-snug ${t.title ? "text-white/60" : "text-white/90"}`}>
+            <p className={`text-caption leading-snug ${t.title ? "text-text-secondary" : "text-text-primary"}`}>
               {t.message}
             </p>
             {t.action && (
               <button
                 onClick={() => { t.action!.onClick(); handleDismiss(); }}
-                className="mt-2 text-[11px] font-medium text-white/80 hover:text-white underline underline-offset-2 transition-colors"
+                className="mt-2 text-caption font-medium text-text-secondary hover:text-text-primary underline underline-offset-2 transition-colors"
               >
                 {t.action.label}
               </button>
@@ -79,17 +77,17 @@ function ToastItem({ t, onRemove }: { t: Toast; onRemove: () => void }) {
           </div>
           <button
             onClick={handleDismiss}
-            className="shrink-0 text-white/30 hover:text-white/70 transition-colors mt-0.5"
+            className="shrink-0 text-text-muted hover:text-text-primary transition-colors mt-0.5"
             aria-label="Dismiss"
           >
-            <X size={13} />
+            <X size={14} />
           </button>
         </div>
       </div>
 
       {/* Progress bar */}
       {duration > 0 && (
-        <div className="h-[2px] bg-white/5">
+        <div className="h-[2px] bg-bg-tertiary">
           <div
             className={`h-full ${accentMap[t.type]} opacity-50 transition-none`}
             style={{ width: `${progress}%` }}

@@ -5,6 +5,7 @@
 
 import CoreAudio
 import AVFAudio
+import CoreGraphics
 import Foundation
 
 @available(macOS 14.2, *)
@@ -217,4 +218,92 @@ public func mnProcessAudioTapDestroy(_ handle: OpaquePointer) {
     let cap: ProcessAudioCapture = mnBoxUnretained(handle)
     cap.stop()
     mnBoxRelease(handle)
+}
+
+// MARK: - Screen Recording permission (gates CoreAudio process taps)
+
+/// True if this app holds Screen Recording (kTCCServiceScreenCapture) permission.
+/// Process taps created without it succeed but emit only silence, so we preflight
+/// this before recording to avoid silently losing system audio.
+@_cdecl("mn_screen_recording_permission")
+public func mnScreenRecordingPermission() -> Bool {
+    CGPreflightScreenCaptureAccess()
+}
+
+/// Show the OS Screen Recording permission prompt (first time only) and return
+/// the resulting grant state. After this is denied the OS won't prompt again;
+/// the user must enable it in System Settings.
+@_cdecl("mn_request_screen_recording_permission")
+public func mnRequestScreenRecordingPermission() -> Bool {
+    CGRequestScreenCaptureAccess()
+}
+
+/// Bundle IDs of processes currently capturing microphone input, as a JSON
+/// array string. Uses CoreAudio's process objects (macOS 14+) — we read WHO
+/// is using the mic, never any audio. Caller frees via mn_call_detect_free.
+@_cdecl("mn_mic_active_bundle_ids")
+public func mnMicActiveBundleIds() -> UnsafeMutablePointer<CChar>? {
+    var addr = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyProcessObjectList,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(
+        AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size
+    ) == noErr, size > 0 else { return makeCString("[]") }
+
+    var procs = [AudioObjectID](
+        repeating: 0,
+        count: Int(size) / MemoryLayout<AudioObjectID>.size
+    )
+    guard AudioObjectGetPropertyData(
+        AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &procs
+    ) == noErr else { return makeCString("[]") }
+
+    var active: [String] = []
+    for proc in procs {
+        var runAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioProcessPropertyIsRunningInput,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var running: UInt32 = 0
+        var runSize = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(proc, &runAddr, 0, nil, &runSize, &running) == noErr,
+              running != 0 else { continue }
+
+        var bidAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioProcessPropertyBundleID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var bid: CFString = "" as CFString
+        var bidSize = UInt32(MemoryLayout<CFString>.size)
+        let err = withUnsafeMutablePointer(to: &bid) { ptr -> OSStatus in
+            AudioObjectGetPropertyData(proc, &bidAddr, 0, nil, &bidSize, ptr)
+        }
+        if err == noErr {
+            let s = bid as String
+            if !s.isEmpty { active.append(s) }
+        }
+    }
+
+    let payload = (try? JSONSerialization.data(withJSONObject: active))
+        .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+    return makeCString(payload)
+}
+
+@_cdecl("mn_call_detect_free")
+public func mnCallDetectFree(_ p: UnsafeMutablePointer<CChar>?) {
+    p?.deallocate()
+}
+
+private func makeCString(_ s: String) -> UnsafeMutablePointer<CChar> {
+    let utf8 = Array(s.utf8) + [0]
+    let buf = UnsafeMutablePointer<CChar>.allocate(capacity: utf8.count)
+    utf8.withUnsafeBufferPointer { src in
+        src.baseAddress.map { buf.update(from: UnsafeRawPointer($0).assumingMemoryBound(to: CChar.self), count: utf8.count) }
+    }
+    return buf
 }

@@ -20,6 +20,8 @@ export const ActionItem = Node.create({
       assignee: { default: null },
       deadline: { default: null },
       done:     { default: false },
+      /** Transcript ms this item cites — drives the [m:ss] source chip. */
+      source_start_ms: { default: null },
     };
   },
 

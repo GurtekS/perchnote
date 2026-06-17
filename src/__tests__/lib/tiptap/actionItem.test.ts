@@ -23,7 +23,7 @@ describe("ActionItem node", () => {
     });
     expect(editor.getJSON().content?.[0]).toEqual({
       type: "actionItem",
-      attrs: { task: "Write the search spec", assignee: "Alice", deadline: "2026-08-05", done: false },
+      attrs: { task: "Write the search spec", assignee: "Alice", deadline: "2026-08-05", done: false, source_start_ms: null },
     });
     editor.destroy();
   });
@@ -42,6 +42,7 @@ describe("ActionItem node", () => {
       assignee: null,
       deadline: null,
       done: false,
+      source_start_ms: null,
     });
     editor.destroy();
   });

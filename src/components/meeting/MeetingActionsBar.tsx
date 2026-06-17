@@ -42,7 +42,7 @@ export function MeetingActionsBar(props: Props) {
           aria-label={transcriptDrawerOpen ? "Close transcript" : "Open transcript"}
           aria-pressed={transcriptDrawerOpen}
         >
-          {transcriptDrawerOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+          {transcriptDrawerOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
         </button>
         <div className="ml-3 opacity-50"><AudioBars isRecording={isRecording} /></div>
         <div className="flex-1" />
@@ -60,7 +60,7 @@ export function MeetingActionsBar(props: Props) {
           <button
             type="button"
             onClick={props.onStop}
-            className={`flex h-8 min-w-[96px] items-center justify-center gap-1.5 rounded-full px-4 text-[13px] font-semibold text-white transition-all ${!isPaused ? "bg-recording recording-pulse" : "bg-recording/50"}`}
+            className={`flex h-8 min-w-[96px] items-center justify-center gap-1.5 rounded-full px-4 text-body-sm font-semibold text-white transition-all ${!isPaused ? "bg-recording recording-pulse" : "bg-recording/50"}`}
             title="Stop recording"
             aria-label="Stop recording"
           >
@@ -83,7 +83,7 @@ export function MeetingActionsBar(props: Props) {
           aria-label={transcriptDrawerOpen ? "Close transcript" : "Open transcript"}
           aria-pressed={transcriptDrawerOpen}
         >
-          {transcriptDrawerOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+          {transcriptDrawerOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
         </button>
         <EnhanceButton
           meetingId={props.meetingId}
@@ -101,7 +101,7 @@ export function MeetingActionsBar(props: Props) {
         <button
           type="button"
           onClick={props.onStart}
-          className="flex h-8 min-w-[112px] items-center justify-center gap-1.5 rounded-full px-4 text-[13px] font-semibold transition-all hover:brightness-110"
+          className="flex h-8 min-w-[112px] items-center justify-center gap-1.5 rounded-full px-4 text-body-sm font-semibold transition-all hover:brightness-110"
           style={{
             background: "rgba(var(--accent-rgb), 0.1)",
             border: "1px solid rgba(var(--accent-rgb), 0.25)",

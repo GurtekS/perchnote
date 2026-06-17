@@ -1,6 +1,7 @@
 // src/components/shared/ContextMenu.tsx
 import { useState, useEffect, type ReactNode } from "react";
 import { ArrowLeft, Check } from "lucide-react";
+import { useOverlay } from "../../lib/overlayStack";
 
 export interface ContextSubItem {
   label: string;
@@ -55,22 +56,19 @@ export function ContextMenu({ items, children }: ContextMenuProps) {
     openAt(rect.left + 16, rect.bottom + 4);
   };
 
+  // Escape rides the dismissal ladder: first press closes the submenu,
+  // the next closes the menu — without leaking to listeners behind it.
+  useOverlay(open, () => {
+    if (activeSubmenu) setActiveSubmenu(null);
+    else setOpen(false);
+  });
+
   useEffect(() => {
     if (!open) return;
     const handleClick = () => { setOpen(false); setActiveSubmenu(null); };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (activeSubmenu) setActiveSubmenu(null);
-        else setOpen(false);
-      }
-    };
     window.addEventListener("click", handleClick);
-    window.addEventListener("keydown", handleKey);
-    return () => {
-      window.removeEventListener("click", handleClick);
-      window.removeEventListener("keydown", handleKey);
-    };
-  }, [open, activeSubmenu]);
+    return () => window.removeEventListener("click", handleClick);
+  }, [open]);
 
   return (
     <>
@@ -78,14 +76,10 @@ export function ContextMenu({ items, children }: ContextMenuProps) {
       {open && (
         <div
           role="menu"
-          className="fixed z-[70] border rounded-lg shadow-xl py-1 min-w-[180px] max-w-[240px] menu-dropdown-left"
+          className="glass-float fixed z-[70] rounded-lg py-1 min-w-[180px] max-w-[240px] menu-dropdown-left"
           style={{
             left: position.x,
             top: position.y,
-            background: "var(--popup-bg)",
-            borderColor: "var(--popup-border)",
-            backdropFilter: "blur(20px)",
-            WebkitBackdropFilter: "blur(20px)",
           }}
           onClick={e => e.stopPropagation()}
         >
@@ -106,7 +100,7 @@ export function ContextMenu({ items, children }: ContextMenuProps) {
                       setOpen(false);
                     }
                   }}
-                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-left transition-colors ${
+                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-body-sm text-left transition-colors ${
                     item.variant === "danger"
                       ? "text-recording hover:bg-recording/10"
                       : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
@@ -114,7 +108,7 @@ export function ContextMenu({ items, children }: ContextMenuProps) {
                 >
                   {item.icon && <span className="shrink-0 opacity-70">{item.icon}</span>}
                   <span className="flex-1">{item.label}</span>
-                  {item.submenu && <span className="text-text-muted text-[11px]">›</span>}
+                  {item.submenu && <span className="text-text-muted text-caption">›</span>}
                 </button>
               </div>
             ))
@@ -125,7 +119,7 @@ export function ContextMenu({ items, children }: ContextMenuProps) {
                 type="button"
                 role="menuitem"
                 onClick={e => { e.stopPropagation(); setActiveSubmenu(null); }}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-caption text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors"
               >
                 <ArrowLeft size={12} />
                 {activeSubmenu.title}
@@ -143,7 +137,7 @@ export function ContextMenu({ items, children }: ContextMenuProps) {
                       setOpen(false);
                       setActiveSubmenu(null);
                     }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-left text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-body-sm text-left text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
                     style={{ paddingLeft: `${12 + (sub.indent ?? 0) * 12}px` }}
                   >
                     {sub.icon && <span className="shrink-0 opacity-70">{sub.icon}</span>}

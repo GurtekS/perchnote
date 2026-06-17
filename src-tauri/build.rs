@@ -8,8 +8,44 @@ fn main() {
             src: "swift/ProcessAudioTap.swift",
             module: "MNProcessAudioTap",
             lib_basename: "mnprocessaudiotap",
-            frameworks: &["CoreAudio", "AVFAudio"],
+            frameworks: &["CoreAudio", "AVFAudio", "CoreGraphics"],
             // CATapDescription needs macOS 14.2.
+            target_macos: "14.2",
+        });
+        compile_swift_helper(SwiftHelper {
+            src: "swift/VoiceProcessedMic.swift",
+            module: "MNVoiceProcessedMic",
+            lib_basename: "mnvoiceprocessedmic",
+            // AVAudioEngine + the voice-processing I/O unit live in AVFAudio.
+            frameworks: &["AVFAudio"],
+            // The ducking-config API (used unguarded) needs macOS 14.0;
+            // match the app's existing 14.2 floor.
+            target_macos: "14.2",
+        });
+        compile_swift_helper(SwiftHelper {
+            src: "swift/SpeechEngine.swift",
+            module: "MNSpeechEngine",
+            lib_basename: "mnspeechengine",
+            // SpeechAnalyzer/SpeechTranscriber (Speech) + AVAudioFile
+            // (AVFAudio) + CMTime (CoreMedia). The frameworks themselves
+            // predate macOS 26; only the SpeechTranscriber symbols are new.
+            frameworks: &["Speech", "AVFAudio", "CoreMedia"],
+            // Deliberately the app's 14.2 floor, NOT 26: compiling against
+            // the older target makes swiftc enforce the @available(macOS 26)
+            // guards AND emit the 26-only Speech symbols as weak imports, so
+            // the binary still loads on pre-26 systems (where the entry
+            // points report unavailable). Targeting 26 here would produce
+            // strong binds that abort dyld on older macOS.
+            target_macos: "14.2",
+        });
+        compile_swift_helper(SwiftHelper {
+            src: "swift/EmbeddingEngine.swift",
+            module: "MNEmbeddingEngine",
+            lib_basename: "mnembeddingengine",
+            // NLContextualEmbedding lives in NaturalLanguage (macOS 14.0+) —
+            // at the app's 14.2 floor it links strongly; no weak-import
+            // gymnastics needed (those were only for 26-only symbols).
+            frameworks: &["NaturalLanguage"],
             target_macos: "14.2",
         });
         compile_swift_helper(SwiftHelper {

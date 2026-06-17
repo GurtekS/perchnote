@@ -36,6 +36,21 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     dot / (na.sqrt() * nb.sqrt())
 }
 
+/// Z-normalize an embedding in place (zero mean, unit variance across its
+/// dims). Removes the common silence-floor offset (ln 1e-10 in quiet bins)
+/// that otherwise dominates cosine similarity and compresses all
+/// similarities toward 1.0. Both clustering and voice-profile matching
+/// normalize at comparison time, so stored raw embeddings stay valid.
+pub fn znorm_embedding(emb: &mut [f32]) {
+    let n = emb.len().max(1) as f32;
+    let mean = emb.iter().sum::<f32>() / n;
+    let var = emb.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / n;
+    let std = var.sqrt().max(1e-6);
+    for v in emb.iter_mut() {
+        *v = (*v - mean) / std;
+    }
+}
+
 /// Map a linear-frequency Hz value to the mel scale.
 fn hz_to_mel(hz: f32) -> f32 {
     2595.0 * (1.0 + hz / 700.0).log10()

@@ -16,6 +16,14 @@ pub fn get_meeting_tags(
 }
 
 #[tauri::command]
+pub fn get_tags_for_meetings(
+    db: State<'_, Database>,
+    meeting_ids: Vec<String>,
+) -> Result<std::collections::HashMap<String, Vec<Tag>>, String> {
+    db.get_tags_for_meetings(&meeting_ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn add_tag_to_meeting(
     db: State<'_, Database>,
     meeting_id: String,

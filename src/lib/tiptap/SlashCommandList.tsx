@@ -37,14 +37,14 @@ export const SlashCommandList = forwardRef<SlashCommandListHandle, Props>(functi
 
   if (items.length === 0) {
     return (
-      <div className="bg-bg-secondary border border-border rounded-lg shadow-lg px-3 py-2 text-xs text-text-muted">
+      <div className="glass-float rounded-lg px-3 py-2 text-xs text-text-muted">
         No matches
       </div>
     );
   }
 
   return (
-    <div className="bg-bg-secondary border border-border rounded-lg shadow-lg overflow-hidden max-h-72 overflow-y-auto min-w-[220px]">
+    <div className="glass-float rounded-lg overflow-hidden max-h-72 overflow-y-auto min-w-[220px]">
       {items.map((item, i) => (
         <button
           key={item.label}
@@ -56,7 +56,7 @@ export const SlashCommandList = forwardRef<SlashCommandListHandle, Props>(functi
           onMouseEnter={() => setSelectedIndex(i)}
         >
           <span className="text-sm font-medium">{item.label}</span>
-          <span className="text-[11px] text-text-muted">{item.description}</span>
+          <span className="text-caption text-text-muted">{item.description}</span>
         </button>
       ))}
     </div>

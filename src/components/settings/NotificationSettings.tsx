@@ -55,7 +55,8 @@ export function NotificationSettings() {
           </div>
           <button
             onClick={() => set("notifications_enabled", enabled ? "false" : "true")}
-            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${
+            aria-label="Meeting reminders"
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
               enabled ? "bg-accent" : "bg-bg-tertiary border border-border"
             }`}
             role="switch"

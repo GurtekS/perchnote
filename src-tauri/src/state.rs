@@ -14,11 +14,18 @@ use crate::transcription::whisper::TranscriptSegment;
 #[derive(Default)]
 pub struct RecordingState {
     pub is_recording: bool,
-    /// Whether the recording is paused 
+    /// Whether the recording is paused
     pub is_paused: bool,
     pub meeting_id: Option<String>,
+    /// SESSION flag: keeps the mixer loop + level monitor alive. Distinct
+    /// from `mic_stream_stop` (design §1c) — killing one mic stream must
+    /// not end the session once the supervisor can rebuild streams.
     pub stop_flag: Option<Arc<AtomicBool>>,
-    /// Pause/resume flag — when true, the mixer skips writing audio 
+    /// The CURRENT cpal mic stream's own kill flag — its owning thread
+    /// drops the !Send Stream when this goes false. Replaced by the mic
+    /// supervisor on every rebuild.
+    pub mic_stream_stop: Option<Arc<AtomicBool>>,
+    /// Pause/resume flag — when true, the mixer skips writing audio
     pub pause_flag: Option<Arc<AtomicBool>>,
     pub segment_tx: Option<mpsc::Sender<TranscriptSegment>>,
     /// System audio capture handle — kept alive while recording 
@@ -31,6 +38,9 @@ pub struct RecordingState {
 
 pub struct AppState {
     pub recording: Mutex<RecordingState>,
+    /// ⌘D timestamps whose transcript segment hasn't arrived yet — the
+    /// forwarding loop applies them as segments land (plan v3 rank 6).
+    pub pending_highlights: Mutex<Vec<u64>>,
     /// Meeting IDs for which a "starting soon" notification has already been sent this session.
     pub notified_meetings: Mutex<HashSet<String>>,
     /// Meeting ID to navigate to when the app window next gains focus (set on notification fire).
@@ -41,6 +51,7 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             recording: Mutex::new(RecordingState::default()),
+            pending_highlights: Mutex::new(Vec::new()),
             notified_meetings: Mutex::new(HashSet::new()),
             pending_navigation: Mutex::new(None),
         }

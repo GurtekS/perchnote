@@ -51,10 +51,10 @@ describe("generatedNotesToTiptap", () => {
     const actionItems = doc.content.filter((n) => (n as { type: string }).type === "actionItem");
     expect(actionItems).toHaveLength(2);
     expect((actionItems[0] as { attrs: object }).attrs).toEqual({
-      task: "Write the spec", assignee: "Alice", deadline: "2026-08-05", done: false,
+      task: "Write the spec", assignee: "Alice", deadline: "2026-08-05", done: false, source_start_ms: null,
     });
     expect((actionItems[1] as { attrs: object }).attrs).toEqual({
-      task: "Schedule review", assignee: null, deadline: null, done: false,
+      task: "Schedule review", assignee: null, deadline: null, done: false, source_start_ms: null,
     });
   });
 
@@ -67,5 +67,34 @@ describe("generatedNotesToTiptap", () => {
     const doc = generatedNotesToTiptap({ ...fullNotes, action_items: [] });
     const headings = doc.content.filter((n) => (n as { type: string }).type === "heading") as { content: { text: string }[] }[];
     expect(headings.some((h) => h.content[0]?.text === "Action Items")).toBe(false);
+  });
+});
+
+describe("bullet anchors (plan v3 rank 7)", () => {
+  it("appends a ⏱ replay mark to anchored bullets only", () => {
+    const doc = generatedNotesToTiptap({
+      title: "T",
+      summary: "",
+      sections: [
+        { heading: "Decisions", bullets: ["Ship v2", "Skip the beta"] },
+      ],
+      action_items: [],
+      tags: [],
+      bullet_anchors: [{ section_index: 0, bullet_index: 1, source_start_ms: 754000 }],
+    });
+    const json = JSON.stringify(doc);
+    expect(json).toContain("Skip the beta  ⏱ 12:34");
+    expect(json).not.toContain("Ship v2  ⏱");
+  });
+
+  it("renders plain bullets when anchors are absent (older providers)", () => {
+    const doc = generatedNotesToTiptap({
+      title: "T",
+      summary: "",
+      sections: [{ heading: "H", bullets: ["plain"] }],
+      action_items: [],
+      tags: [],
+    });
+    expect(JSON.stringify(doc)).toContain('"text":"plain"');
   });
 });

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -15,6 +16,7 @@ import {
   Loader2,
   LockKeyhole,
   Mic,
+  MonitorSpeaker,
   PlayCircle,
   Settings,
   ShieldCheck,
@@ -24,7 +26,9 @@ import type { LucideIcon } from "lucide-react";
 import { ipc, type ModelInfo } from "../../lib/ipc";
 import { useOnboarding, type OnboardingProgress, type OnboardingStepId } from "../../hooks/useOnboarding";
 import { toast } from "../../stores/toastStore";
+import { toUserMessage } from "../../lib/errors";
 import type { SettingsSection } from "./SettingsView";
+import { primarySettingsButtonClass, secondarySettingsButtonClass } from "./settingsUi";
 
 export type OnboardingFlowMode = "first-run" | "preview";
 export type OnboardingRepairSection = Extract<SettingsSection, "audio" | "ai" | "calendar">;
@@ -90,6 +94,13 @@ const ONBOARDING_STEPS: OnboardingStep[] = [
     icon: Calendar,
   },
   {
+    id: "test",
+    label: "Test",
+    title: "Prove the pipeline",
+    description: "Record five seconds of your voice and watch it transcribe — the same path every real meeting uses.",
+    icon: Mic,
+  },
+  {
     id: "start",
     label: "Start",
     title: "Ready to capture meetings",
@@ -125,8 +136,8 @@ const AI_OPTIONS: Array<{
 ];
 
 const FOCUS_RING = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70";
-const PRIMARY_BUTTON_CLASS = `inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`;
-const SECONDARY_BUTTON_CLASS = `inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`;
+const PRIMARY_BUTTON_CLASS = primarySettingsButtonClass;
+const SECONDARY_BUTTON_CLASS = secondarySettingsButtonClass;
 
 function getPrimaryActionLabel({
   configuredCalendarCount,
@@ -147,7 +158,8 @@ function getPrimaryActionLabel({
   if (stepId === "privacy") return "Check audio";
   if (stepId === "audio") return micStatus === "requested" ? "Review AI options" : "Skip audio setup";
   if (stepId === "ai") return hasAnthropicKey ? "Review calendar options" : "Skip AI setup";
-  if (stepId === "calendar") return configuredCalendarCount > 0 ? "Review start steps" : "Skip calendar setup";
+  if (stepId === "calendar") return configuredCalendarCount > 0 ? "Test your setup" : "Skip calendar setup";
+  if (stepId === "test") return "Review start steps";
   return "Continue";
 }
 
@@ -165,6 +177,7 @@ export function OnboardingFlow({
   const [stepIndex, setStepIndex] = useState(0);
   const [hasAppliedResumeStep, setHasAppliedResumeStep] = useState(isPreview);
   const [micStatus, setMicStatus] = useState<"idle" | "checking" | "requested">("idle");
+  const [screenStatus, setScreenStatus] = useState<"idle" | "checking" | "requested">("idle");
   const [audioError, setAudioError] = useState<string | null>(null);
   const [previewAiProvider, setPreviewAiProvider] = useState<AiProvider | null>(null);
   const [previewHasAnthropicKey, setPreviewHasAnthropicKey] = useState(false);
@@ -427,7 +440,7 @@ export function OnboardingFlow({
       try {
         await onComplete();
       } catch (e) {
-        toast.error(`Could not complete onboarding: ${String(e)}`);
+        toast.error(toUserMessage(e, "Could not complete onboarding"), "Could not complete onboarding");
       } finally {
         setIsCompleting(false);
       }
@@ -458,7 +471,9 @@ export function OnboardingFlow({
 
       let started = false;
       try {
-        await ipc.startRecording("permission-check");
+        // mic-only probe: this checks Microphone permission, so don't let the
+        // separate Screen Recording gate block it.
+        await ipc.startRecording("permission-check", null, false);
         started = true;
       } catch {
         // Expected on systems where the probe only opens the permission dialog.
@@ -476,6 +491,115 @@ export function OnboardingFlow({
     } catch (e) {
       setMicStatus("idle");
       setAudioError(formatErrorMessage(e));
+    }
+  };
+
+  const { data: hasScreenRecording = false, refetch: refetchScreenPermission } = useQuery({
+    queryKey: ["system-audio-permission"],
+    queryFn: ipc.checkSystemAudioPermission,
+    retry: false,
+    enabled: !isPreview,
+  });
+
+  const handleRequestScreenRecording = async () => {
+    setScreenStatus("checking");
+    try {
+      if (isPreview) {
+        setScreenStatus("requested");
+        return;
+      }
+      await markStepViewed("audio");
+      const granted = await ipc.requestSystemAudioPermission();
+      setScreenStatus("requested");
+      void refetchScreenPermission();
+      if (granted) {
+        toast.success("Screen Recording granted — restart Perchnote before your first recording");
+      } else {
+        toast.info(
+          "Enable Perchnote under System Settings → Privacy & Security → Screen Recording, then restart the app",
+        );
+      }
+    } catch (e) {
+      setScreenStatus("idle");
+      toast.error(formatErrorMessage(e));
+    }
+  };
+
+  // Background-download the default transcription model while the user walks
+  // the wizard, so the first recording isn't blocked on a fetch (plan rank 5).
+  // The backend command is idempotent — returns immediately if present.
+  useEffect(() => {
+    if (isPreview || !hasAppliedResumeStep) return;
+    ipc
+      .listWhisperModels()
+      .then((models) => {
+        const def = models.find((m) => m.id === "base.en");
+        if (def && !def.downloaded) {
+          ipc
+            .downloadWhisperModel("base.en")
+            .then(() => {
+              queryClient.invalidateQueries({ queryKey: ["whisper-models"] });
+              toast.success("Transcription model ready");
+            })
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPreview, hasAppliedResumeStep]);
+
+  const [testStatus, setTestStatus] = useState<
+    "idle" | "recording" | "transcribing" | "done" | "error"
+  >("idle");
+  const [testTranscript, setTestTranscript] = useState<string | null>(null);
+  const [testCountdown, setTestCountdown] = useState(0);
+
+  // Live pipeline proof (plan rank 5): record 5s through the REAL recording
+  // path into a real (then soft-deleted) meeting and show the first segment.
+  const handleTestStart = async () => {
+    if (isPreview) {
+      setTestTranscript("Preview mode — transcription runs on real recordings.");
+      setTestStatus("done");
+      return;
+    }
+    setTestStatus("recording");
+    setTestTranscript(null);
+    let meetingId: string | null = null;
+    try {
+      const m = await ipc.createMeeting("Setup test (auto-deleted)");
+      meetingId = m.id;
+      await ipc.startRecording(m.id, null, false); // mic-only
+      for (let s = 5; s > 0; s--) {
+        setTestCountdown(s);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      setTestCountdown(0);
+      setTestStatus("transcribing");
+      await ipc.stopRecording();
+      for (let i = 0; i < 60; i++) {
+        const t = await ipc.getTranscriptByMeeting(m.id);
+        if (t) {
+          try {
+            const segs = JSON.parse(t.segments || "[]") as Array<{ text?: string }>;
+            const first = segs.find((s) => s.text && s.text.trim().length > 0);
+            if (first) {
+              setTestTranscript(first.text!.trim());
+              setTestStatus("done");
+              return;
+            }
+          } catch { /* keep polling */ }
+        }
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      setTestStatus("error");
+    } catch {
+      setTestStatus("error");
+      try { await ipc.stopRecording(); } catch { /* not recording */ }
+    } finally {
+      if (meetingId) {
+        ipc.softDeleteMeeting(meetingId).catch(() => {});
+        queryClient.invalidateQueries({ queryKey: ["meetings"] });
+      }
     }
   };
 
@@ -610,7 +734,7 @@ export function OnboardingFlow({
                     </span>
                     <span className="min-w-0">
                       <span className="block text-sm font-medium">{item.label}</span>
-                      <span className="block truncate text-[11px] text-text-muted">{item.title}</span>
+                      <span className="block truncate text-caption text-text-muted">{item.title}</span>
                     </span>
                   </button>
                 </li>
@@ -656,6 +780,17 @@ export function OnboardingFlow({
                 whisperReadiness={whisperReadiness}
                 onOpenSettingsSection={onOpenSettingsSection}
                 onRequestMic={handleRequestMic}
+                screenStatus={screenStatus}
+                hasScreenRecording={hasScreenRecording}
+                onRequestScreenRecording={handleRequestScreenRecording}
+              />
+            )}
+            {activeStep.id === "test" && (
+              <TestStep
+                status={testStatus}
+                transcript={testTranscript}
+                countdown={testCountdown}
+                onStart={handleTestStart}
               />
             )}
             {activeStep.id === "ai" && (
@@ -772,6 +907,9 @@ function AudioStep({
   whisperReadiness,
   onOpenSettingsSection,
   onRequestMic,
+  screenStatus,
+  hasScreenRecording,
+  onRequestScreenRecording,
 }: {
   deviceReadiness: ReadinessStatus;
   error: string | null;
@@ -780,6 +918,9 @@ function AudioStep({
   whisperReadiness: ReadinessStatus;
   onOpenSettingsSection?: (section: OnboardingRepairSection) => void;
   onRequestMic: () => void;
+  screenStatus: "idle" | "checking" | "requested";
+  hasScreenRecording: boolean;
+  onRequestScreenRecording: () => void;
 }) {
   const requested = status === "requested";
   const openAudioSettings = onOpenSettingsSection
@@ -791,7 +932,7 @@ function AudioStep({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-border bg-bg-tertiary p-4">
+      <div className="card p-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-3">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
@@ -815,7 +956,7 @@ function AudioStep({
           <InlineIssue
             className="mt-3"
             title="Microphone permission check failed"
-            message={error}
+            message={`${error} — if you denied access, enable Perchnote under System Settings → Privacy & Security → Microphone, then try again.`}
           />
         )}
 
@@ -823,15 +964,50 @@ function AudioStep({
           <button
             type="button"
             onClick={onRequestMic}
-            disabled={status === "checking" || requested}
+            disabled={status === "checking" || (requested && !error)}
             aria-busy={status === "checking"}
             className={`${PRIMARY_BUTTON_CLASS} min-w-[222px] disabled:opacity-60`}
           >
             {status === "checking" ? <Loader2 size={14} className="animate-spin" /> : <Mic size={14} />}
-            {requested ? "Permission check requested" : "Request microphone access"}
+            {error ? "Try again" : requested ? "Permission check requested" : "Request microphone access"}
           </button>
           <p className="text-xs text-text-muted">Skip for now if needed; recording will ask later.</p>
         </div>
+      </div>
+
+      <div className="card p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+              {hasScreenRecording ? <CheckCircle2 size={18} /> : <MonitorSpeaker size={18} />}
+            </span>
+            <div>
+              <h3 className="text-sm font-semibold text-text-primary">Screen Recording permission</h3>
+              <p className="mt-1 text-sm text-text-secondary">
+                Needed to capture other participants&apos; audio in Zoom, Meet, and
+                browser calls. A fresh grant takes effect after restarting Perchnote.
+              </p>
+            </div>
+          </div>
+          <StatusBadge tone={hasScreenRecording ? "ok" : "neutral"}>
+            {hasScreenRecording ? "granted" : "optional"}
+          </StatusBadge>
+        </div>
+        {!hasScreenRecording && (
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onRequestScreenRecording}
+              disabled={screenStatus === "checking"}
+              aria-busy={screenStatus === "checking"}
+              className={`${PRIMARY_BUTTON_CLASS} min-w-[222px] disabled:opacity-60`}
+            >
+              {screenStatus === "checking" ? <Loader2 size={14} className="animate-spin" /> : <MonitorSpeaker size={14} />}
+              {screenStatus === "requested" ? "Requested — restart to apply" : "Request Screen Recording"}
+            </button>
+            <p className="text-xs text-text-muted">Skip to record mic-only; you can grant this later.</p>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
@@ -847,6 +1023,72 @@ function AudioStep({
           status={whisperReadiness}
           action={openAudioSettings}
         />
+      </div>
+    </div>
+  );
+}
+
+function TestStep({
+  status,
+  transcript,
+  countdown,
+  onStart,
+}: {
+  status: "idle" | "recording" | "transcribing" | "done" | "error";
+  transcript: string | null;
+  countdown: number;
+  onStart: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="card p-4">
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+            {status === "done" ? <CheckCircle2 size={18} /> : <Mic size={18} />}
+          </span>
+          <div>
+            <h3 className="text-sm font-semibold text-text-primary">Five-second test recording</h3>
+            <p className="mt-1 text-sm text-text-secondary">
+              Say a sentence out loud. This runs the exact capture → transcribe
+              pipeline your meetings will use, then deletes itself.
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={onStart}
+            disabled={status === "recording" || status === "transcribing"}
+            aria-busy={status === "recording" || status === "transcribing"}
+            className={`${PRIMARY_BUTTON_CLASS} min-w-[222px] disabled:opacity-60`}
+          >
+            {status === "recording" ? (
+              <>Recording… {countdown}</>
+            ) : status === "transcribing" ? (
+              <>
+                <Loader2 size={14} className="animate-spin" /> Transcribing…
+              </>
+            ) : status === "done" || status === "error" ? (
+              "Test again"
+            ) : (
+              "Start the test"
+            )}
+          </button>
+          <p className="text-xs text-text-muted">Mic-only; nothing leaves this Mac.</p>
+        </div>
+        {status === "done" && transcript && (
+          <div className="mt-4 rounded-lg border border-accent/20 bg-accent/5 p-3">
+            <p className="section-label mb-1">Heard you say</p>
+            <p className="text-sm text-text-primary">“{transcript}”</p>
+          </div>
+        )}
+        {status === "error" && (
+          <InlineIssue
+            className="mt-3"
+            title="No transcript came back"
+            message="Check the microphone permission above, make sure a transcription model finished downloading, and try again."
+          />
+        )}
       </div>
     </div>
   );
@@ -915,7 +1157,7 @@ function AiStep({
       </div>
 
       {aiProvider === "anthropic" && (
-        <div className="rounded-lg border border-border bg-bg-tertiary p-4">
+        <div className="card p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold text-text-primary">Anthropic API key</h3>
@@ -933,7 +1175,7 @@ function AiStep({
               type="password"
               value={anthropicKey}
               onChange={(event) => onAnthropicKeyChange(event.target.value)}
-              placeholder={hasAnthropicKey ? "Paste a new key to replace" : "sk-ant-..."}
+              placeholder={hasAnthropicKey ? "Paste a new key to replace" : "sk-ant-…"}
               autoComplete="off"
               spellCheck={false}
               className="min-w-0 flex-1 rounded-lg border border-border bg-bg-secondary px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
@@ -1014,7 +1256,7 @@ function CalendarStep({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between rounded-lg border border-border bg-bg-tertiary px-4 py-3">
+      <div className="card flex items-center justify-between px-4 py-3">
         <div>
           <h3 className="text-sm font-semibold text-text-primary">Calendar sync status</h3>
           <p className="mt-1 text-xs text-text-muted">
@@ -1116,7 +1358,7 @@ function CalendarProviderPanel({
   onToggle: () => void;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-bg-tertiary p-4">
+    <div className="card p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
@@ -1240,6 +1482,52 @@ function StartStep({
           value={configuredCalendarCount > 0 ? `${configuredCalendarCount} configured` : "configure later"}
         />
       </div>
+
+      {/* First-five-minutes value (plan v10 #6): don't make the first real
+          artifact wait for the first real meeting — any recording the user
+          already has works right now. Drops are live even on this screen
+          (the app-wide import listener is already mounted). */}
+      <ImportTeaser />
+    </div>
+  );
+}
+
+/** "Have a recording already?" affordance on the final onboarding step,
+ *  with live status when a drop actually happens mid-onboarding. */
+function ImportTeaser() {
+  const [importState, setImportState] = useState<{ status: string; title: string } | null>(null);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    listen<{ status: string; title: string }>("import-progress", (e) => {
+      setImportState(e.payload);
+    }).then((fn) => {
+      // Unmounting before listen() resolves runs the cleanup below while
+      // unlisten is still undefined — drop the registration immediately.
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  return (
+    <div className="rounded-lg border border-dashed border-border bg-bg-tertiary/50 p-4">
+      <h3 className="text-sm font-semibold text-text-primary">Have a recording already?</h3>
+      <p className="mt-1 text-sm text-text-secondary">
+        Drop a Voice Memo or call recording anywhere on this window — it becomes a
+        transcribed, searchable meeting, all on this Mac. It&apos;ll be waiting when
+        you finish setup.
+      </p>
+      {importState && (
+        <p className="mt-2 text-xs text-accent" role="status">
+          {importState.status === "complete"
+            ? `✓ Imported “${importState.title}” — it's in your meeting list`
+            : `Importing “${importState.title}” (${importState.status})…`}
+        </p>
+      )}
     </div>
   );
 }
@@ -1259,7 +1547,7 @@ function ReadinessCard({
   title: string;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-bg-tertiary p-4">
+    <div className="card p-4">
       <div className="flex items-start justify-between gap-3">
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
           <Icon size={16} />
@@ -1363,7 +1651,7 @@ function InfoTile({
   title: string;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-bg-tertiary p-4">
+    <div className="card p-4">
       <span className="mb-3 flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10 text-accent">
         <Icon size={16} />
       </span>
@@ -1391,7 +1679,7 @@ function StatusBadge({
 
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium ${className}`}
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-caption font-medium ${className}`}
     >
       {children}
     </span>
@@ -1400,8 +1688,8 @@ function StatusBadge({
 
 function SummaryItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-border bg-bg-tertiary p-3">
-      <p className="text-[11px] font-medium uppercase text-text-muted">{label}</p>
+    <div className="card p-3">
+      <p className="text-caption font-medium uppercase text-text-muted">{label}</p>
       <p className="mt-1 text-sm font-medium text-text-primary">{value}</p>
     </div>
   );

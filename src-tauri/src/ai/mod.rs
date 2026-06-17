@@ -11,6 +11,8 @@
 
 pub mod anthropic_api;
 pub mod apple_ai;
+pub mod apple_embed;
+pub mod embeddings;
 pub mod ollama;
 pub mod prompts;
 
@@ -79,6 +81,25 @@ fn ollama_model(db: &Database) -> String {
         .unwrap_or_else(|| DEFAULT_OLLAMA_MODEL.to_string())
 }
 
+/// (provider, model) that a generation dispatched right now would use —
+/// stamped onto the enhance receipt (plan v10 #2). Resolved the same way
+/// `generate_notes` resolves its backend, minus the credential checks
+/// (the receipt records intent at dispatch; a missing key fails the call
+/// itself before anything is persisted).
+pub fn provider_receipt(db: &Database) -> (String, String) {
+    match selected_provider(db) {
+        Provider::Anthropic => (
+            "anthropic".to_string(),
+            db.get_setting(ANTHROPIC_MODEL_SETTING)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| DEFAULT_ANTHROPIC_MODEL.to_string()),
+        ),
+        Provider::Ollama => ("ollama".to_string(), ollama_model(db)),
+        Provider::AppleIntelligence => ("apple".to_string(), "on-device".to_string()),
+    }
+}
+
 pub async fn generate_notes(db: &Database, prompt: &str) -> Result<GeneratedNotes> {
     match selected_provider(db) {
         Provider::Anthropic => {
@@ -90,6 +111,29 @@ pub async fn generate_notes(db: &Database, prompt: &str) -> Result<GeneratedNote
             ollama::generate_notes(prompt, &model).await
         }
         Provider::AppleIntelligence => apple_ai::generate_notes(prompt).await,
+    }
+}
+
+/// Streaming variant of `generate_notes`. Anthropic streams live summary
+/// deltas through `on_delta`; other providers fall back to the blocking
+/// call and emit nothing (the UI keeps its skeleton).
+pub async fn generate_notes_streaming(
+    db: &Database,
+    prompt: &str,
+    on_delta: &(dyn Fn(&str) + Send + Sync),
+) -> Result<GeneratedNotes> {
+    match selected_provider(db) {
+        Provider::Anthropic => {
+            let (key, model) = anthropic_creds(db)?;
+            anthropic_api::generate_notes_streaming(prompt, &key, &model, on_delta).await
+        }
+        Provider::Ollama => {
+            let model = ollama_model(db);
+            ollama::generate_notes_streaming(prompt, &model, on_delta).await
+        }
+        // Apple Intelligence stays blocking until snapshot streaming lands
+        // in the Swift bridge.
+        Provider::AppleIntelligence => generate_notes(db, prompt).await,
     }
 }
 

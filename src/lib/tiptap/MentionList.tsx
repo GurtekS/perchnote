@@ -36,14 +36,14 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
 
   if (items.length === 0) {
     return (
-      <div className="bg-bg-secondary border border-border rounded-lg shadow-lg px-3 py-2 text-xs text-text-muted">
+      <div className="glass-float rounded-lg px-3 py-2 text-xs text-text-muted">
         No matches
       </div>
     );
   }
 
   return (
-    <div className="bg-bg-secondary border border-border rounded-lg shadow-lg overflow-hidden max-h-60 overflow-y-auto min-w-[180px]">
+    <div className="glass-float rounded-lg overflow-hidden max-h-60 overflow-y-auto min-w-[180px]">
       {items.map((name, i) => (
         <button
           key={name}
@@ -54,7 +54,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
           onMouseDown={(e) => { e.preventDefault(); command({ id: name }); }}
           onMouseEnter={() => setSelectedIndex(i)}
         >
-          <span className="w-5 h-5 rounded-full bg-accent text-white text-[10px] font-semibold flex items-center justify-center">
+          <span className="w-5 h-5 rounded-full bg-accent text-white text-footnote font-semibold flex items-center justify-center">
             {name[0]?.toUpperCase() ?? "?"}
           </span>
           <span>{name}</span>

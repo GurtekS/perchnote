@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  BookOpen,
   Check,
   MoreHorizontal,
   Pencil,
@@ -12,11 +13,14 @@ import {
   FolderOpen,
   Download,
 } from "lucide-react";
-import { format, intervalToDuration } from "date-fns";
+import { format } from "date-fns";
 import { ipc, Meeting, buildFolderTree, FolderNode } from "../../lib/ipc";
+import { serializeTiptapToMarkdown } from "../../lib/tiptap/serializeTiptap";
 import { toast } from "../../stores/toastStore";
+import { toUserMessage } from "../../lib/errors";
 import { useThemeStore, folderColorFromId } from "../../stores/themeStore";
 import { ConfirmDialog } from "../shared/ConfirmDialog";
+import { RecipesPanel } from "./RecipesPanel";
 
 function renderFolderTree(
   nodes: FolderNode[],
@@ -33,7 +37,7 @@ function renderFolderTree(
           type="button"
           onClick={() => onToggle(f.id, isIn)}
           aria-label={`${isIn ? "Remove from" : "Add to"} folder ${f.name}`}
-          className="w-full flex items-center gap-2 py-1.5 text-[13px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+          className="w-full flex items-center gap-2 py-1.5 text-body-sm text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
           style={{ paddingLeft: `${12 + depth * 14}px`, paddingRight: "12px" }}
         >
           <span className="w-2 h-2 rounded-full shrink-0" style={{ background: folderColorFromId(f.id, accent) }} />
@@ -66,12 +70,24 @@ export function MeetingHeader({
   const accentColor = useThemeStore(s => s.accentColor);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState("");
+  // What the current edit session started from — an unchanged blur is a
+  // no-op even if the title moved underneath (see handleTitleSave).
+  const editSeedRef = useRef("");
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showFolderPopover, setShowFolderPopover] = useState(false);
   const [lastExportDir, setLastExportDir] = useState<string | null>(null);
+  const [recipesOpen, setRecipesOpen] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Gates the Recipes affordance (plan v9 #6) — same posture as Ask AI and
+  // catch-me-up: without an AI provider the button shouldn't exist at all.
+  const { data: aiConfigured = false } = useQuery({
+    queryKey: ["aiConfigured"],
+    queryFn: ipc.checkAiConfigured,
+    staleTime: 60_000,
+  });
 
   const { data: folders = [] } = useQuery({
     queryKey: ["folders"],
@@ -114,9 +130,22 @@ export function MeetingHeader({
     return () => window.removeEventListener("click", handleClick);
   }, [showFolderPopover]);
 
+  // Palette "Recipes…" row (discoverability batch): the panel's open state
+  // lives here, so the palette reaches it via a DOM event — same pattern as
+  // palette-enhance-notes and open-transcript-drawer.
+  useEffect(() => {
+    const handler = () => setRecipesOpen(true);
+    document.addEventListener("open-recipes", handler);
+    return () => document.removeEventListener("open-recipes", handler);
+  }, []);
+
   const handleTitleSave = useCallback(async () => {
     const trimmed = editTitle.trim();
-    if (trimmed && trimmed !== meeting.title) {
+    // The second clause guards against a stale snapshot: if the title
+    // changed underneath the edit session (the transcript auto-titler) and
+    // the user blurs without typing, saving the untouched seed would
+    // silently revert that change.
+    if (trimmed && trimmed !== meeting.title && trimmed !== editSeedRef.current) {
       await ipc.updateMeetingTitle(meetingId, trimmed);
       queryClient.invalidateQueries({ queryKey: ["meeting", meetingId] });
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
@@ -158,7 +187,7 @@ export function MeetingHeader({
         const gen = JSON.parse(noteData.generated_content);
         if (gen.type === "doc" || Array.isArray(gen.content)) {
           // New TipTap JSON format
-          lines.push(extractTextFromTiptap(gen));
+          lines.push(serializeTiptapToMarkdown(gen));
         } else {
           // Old structured format: { summary, sections, action_items }
           if (gen.summary) { lines.push(gen.summary); lines.push(""); }
@@ -180,7 +209,7 @@ export function MeetingHeader({
     // Include manual notes if present and different from AI notes
     if (noteData?.raw_content) {
       try {
-        const raw = extractTextFromTiptap(JSON.parse(noteData.raw_content));
+        const raw = serializeTiptapToMarkdown(JSON.parse(noteData.raw_content));
         if (raw.trim()) {
           if (noteData.generated_content) {
             lines.push("");
@@ -206,12 +235,27 @@ export function MeetingHeader({
       lines.push(`> Date: ${format(new Date(meeting.scheduled_start), "MMM d, yyyy h:mm a")}`);
     }
     lines.push("");
+    // AI notes FIRST — they are the artifact people mean to share (deep
+    // review P1: export silently omitted generated_content while Copy
+    // Notes preferred it; recipients got scratch notes + transcript and
+    // no summary or action items).
+    if (noteData?.generated_content) {
+      try {
+        const gen = JSON.parse(noteData.generated_content);
+        lines.push("## Notes");
+        lines.push("");
+        lines.push(serializeTiptapToMarkdown(gen));
+        lines.push("");
+      } catch {
+        // skip
+      }
+    }
     if (noteData?.raw_content) {
       try {
         const content = JSON.parse(noteData.raw_content);
-        lines.push("## Notes");
+        lines.push(noteData?.generated_content ? "## My notes" : "## Notes");
         lines.push("");
-        lines.push(extractTextFromTiptap(content));
+        lines.push(serializeTiptapToMarkdown(content));
         lines.push("");
       } catch {
         // skip
@@ -231,7 +275,12 @@ export function MeetingHeader({
       }
     }
     const markdown = lines.join("\n");
-    const filename = `${meeting.title.replace(/[^a-zA-Z0-9 ]/g, "").replace(/\s+/g, "-").toLowerCase()}.md`;
+    // CJK/emoji titles reduced to "" → an invisible ".md" dotfile on the
+    // Desktop (whole-app review P3); fall back like the vault mirror does.
+    const stem =
+      meeting.title.replace(/[^a-zA-Z0-9 ]/g, "").replace(/\s+/g, "-").toLowerCase() ||
+      "untitled-meeting";
+    const filename = `${stem}.md`;
     try {
       const savedPath = await ipc.saveMarkdownExport(filename, markdown);
       // Use lastIndexOf safely — on macOS paths always have /, but guard against edge case
@@ -240,30 +289,13 @@ export function MeetingHeader({
       setLastExportDir(dir);
       toast.success("Exported to Desktop");
     } catch (e) {
-      toast.error("Export failed: " + String(e));
+      toast.error(toUserMessage(e), "Export failed");
     }
     setShowMenu(false);
   };
 
-  // Date display
-  const dateStr = meeting.scheduled_start
-    ? format(new Date(meeting.scheduled_start), "MMM d, yyyy 'at' h:mm a")
-    : format(new Date(meeting.created_at), "MMM d, yyyy");
-
-  // Duration (only after meeting ends)
-  let durationStr = "";
-  if (meeting.actual_start && meeting.actual_end) {
-    const dur = intervalToDuration({
-      start: new Date(meeting.actual_start),
-      end: new Date(meeting.actual_end),
-    });
-    const h = dur.hours ?? 0;
-    const m = dur.minutes ?? 0;
-    if (h > 0 && m > 0) durationStr = `${h}h ${m}m`;
-    else if (h > 0) durationStr = `${h}h`;
-    else if (m > 0) durationStr = `${m}m`;
-    else durationStr = "< 1m";
-  }
+  // Date/duration now live solely on the metadata line below the header
+  // (UI review #1 — they rendered three times on this screen).
 
   if (isRecording) {
     const mm = String(Math.floor(elapsedSeconds / 60)).padStart(2, "0");
@@ -294,8 +326,8 @@ export function MeetingHeader({
             />
           ) : (
             <h1
-              className="flex-1 cursor-text truncate text-[18px] font-semibold text-text-primary transition-colors hover:text-accent"
-              onClick={() => { setEditTitle(meeting.title); setIsEditingTitle(true); }}
+              className="flex-1 cursor-text truncate text-lg font-semibold text-text-primary transition-colors hover:text-accent"
+              onClick={() => { setEditTitle(meeting.title); editSeedRef.current = meeting.title; setIsEditingTitle(true); }}
               title="Click to rename"
             >
               {meeting.title}
@@ -325,7 +357,7 @@ export function MeetingHeader({
             title="Back to meetings"
             aria-label="Back to meetings"
           >
-            <ArrowLeft size={17} />
+            <ArrowLeft size={16} />
           </button>
 
           {/* Title + date */}
@@ -348,10 +380,11 @@ export function MeetingHeader({
                 title="Click to rename"
                 onClick={() => {
                   setEditTitle(meeting.title);
+                  editSeedRef.current = meeting.title;
                   setIsEditingTitle(true);
                 }}
               >
-                <h1 className="truncate text-[18px] font-semibold text-text-primary transition-colors group-hover/title:text-accent">
+                <h1 className="truncate text-lg font-semibold text-text-primary transition-colors group-hover/title:text-accent">
                   {meeting.title}
                 </h1>
                 <Pencil size={11} className="mb-0.5 shrink-0 text-text-muted opacity-0 transition-opacity group-hover/title:opacity-40 group-focus-within/title:opacity-60" />
@@ -361,13 +394,6 @@ export function MeetingHeader({
               className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5"
               style={{ color: "rgba(var(--accent-rgb), 0.6)", fontSize: "11px" }}
             >
-              <span className="truncate">{dateStr}</span>
-              {durationStr && (
-                <>
-                  <span className="opacity-40">|</span>
-                  <span>{durationStr}</span>
-                </>
-              )}
               {/* Save indicator */}
               {saveStatus === "saving" && (
                 <span className="text-text-muted">Saving...</span>
@@ -383,27 +409,42 @@ export function MeetingHeader({
             {/* Folder pills */}
             <div className="relative mt-1 flex flex-wrap items-center gap-1.5">
               {meetingFolders.length > 0 ? (
-                meetingFolders.map(f => (
+                <>
+                  {meetingFolders.map(f => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate({ to: "/folders/$folderId", params: { folderId: f.id } });
+                      }}
+                      className="flex max-w-[180px] items-center gap-1 rounded-full px-2 py-0.5 text-footnote text-text-muted transition-colors"
+                      style={{ background: "var(--glass-search-bg)", border: "1px solid var(--glass-search-border)" }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--glass-search-border)"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--glass-search-bg)"; }}
+                      aria-label={`Open folder ${f.name}`}
+                      title={`Open “${f.name}” — ⌘[ comes back here`}
+                    >
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: folderColorFromId(f.id, accentColor) }} />
+                      <span className="truncate">{f.name}</span>
+                    </button>
+                  ))}
                   <button
-                    key={f.id}
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setShowFolderPopover(true); }}
-                    className="flex max-w-[180px] items-center gap-1 rounded-full px-2 py-0.5 text-[10px] text-text-muted transition-colors"
+                    className="flex items-center rounded-full px-1.5 py-0.5 text-footnote text-text-muted transition-colors hover:text-text-primary"
                     style={{ background: "var(--glass-search-bg)", border: "1px solid var(--glass-search-border)" }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--glass-search-border)"; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--glass-search-bg)"; }}
                     aria-label="Edit meeting folders"
-                    title="Edit meeting folders"
+                    title="Edit folders"
                   >
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: folderColorFromId(f.id, accentColor) }} />
-                    <span className="truncate">{f.name}</span>
+                    +
                   </button>
-                ))
+                </>
               ) : (
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); setShowFolderPopover(true); }}
-                  className="flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] text-text-muted transition-colors hover:bg-bg-hover hover:text-accent"
+                  className="flex h-6 items-center gap-1 rounded-md px-1.5 text-caption text-text-muted transition-colors hover:bg-bg-hover hover:text-accent"
                   aria-label="Add meeting to folder"
                 >
                   + Add to folder
@@ -413,14 +454,13 @@ export function MeetingHeader({
               {/* Folder picker popover */}
               {showFolderPopover && (
                 <div
-                  className="absolute left-0 top-full mt-1 z-30 min-w-[180px] max-w-[240px] rounded-lg border py-1 shadow-xl"
-                  style={{ background: "var(--popup-bg)", borderColor: "var(--popup-border)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" }}
+                  className="glass-float absolute left-0 top-full mt-1 z-30 min-w-[180px] max-w-[240px] rounded-lg py-1"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="px-3 py-1.5 text-[11px] font-medium text-text-muted">Add to folder</div>
+                  <div className="px-3 py-1.5 text-caption font-medium text-text-muted">Add to folder</div>
                   <div className="my-1 border-t border-border" />
                   {folderTree.length === 0 ? (
-                    <p className="px-3 py-2 text-[12px] text-text-muted">No folders yet</p>
+                    <p className="px-3 py-2 text-caption text-text-muted">No folders yet</p>
                   ) : (
                     renderFolderTree(folderTree, 0, meetingFolderIdSet, async (folderId, isIn) => {
                       try {
@@ -429,7 +469,7 @@ export function MeetingHeader({
                         queryClient.invalidateQueries({ queryKey: ["meetingFolders", meetingId] });
                         queryClient.invalidateQueries({ queryKey: ["meetings"] });
                         queryClient.invalidateQueries({ queryKey: ["folders"] });
-                      } catch (e) { toast.error(String(e)); }
+                      } catch (e) { toast.error(toUserMessage(e)); }
                       setShowFolderPopover(false);
                     }, accentColor)
                   )}
@@ -454,6 +494,20 @@ export function MeetingHeader({
             </button>
           )}
 
+          {/* Recipes (plan v9 #6) — saved prompts run against this meeting */}
+          {aiConfigured && (
+            <button
+              type="button"
+              onClick={() => setRecipesOpen(true)}
+              title="Recipes — run a saved prompt on this meeting"
+              aria-label="Open recipes"
+              className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+            >
+              <BookOpen size={13} />
+              Recipes
+            </button>
+          )}
+
           {/* Overflow menu */}
           <div className="relative" ref={menuRef}>
             <button
@@ -463,11 +517,11 @@ export function MeetingHeader({
               title="More options"
               aria-label="More meeting options"
             >
-              <MoreHorizontal size={17} />
+              <MoreHorizontal size={16} />
             </button>
 
             {showMenu && (
-              <div className="menu-dropdown absolute right-0 top-full mt-1 w-52 border rounded-lg shadow-xl z-50 py-1" style={{ background: "var(--popup-bg)", borderColor: "var(--popup-border)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" }}>
+              <div className="glass-float menu-dropdown absolute right-0 top-full mt-1 w-52 rounded-lg z-50 py-1">
                 <button
                   type="button"
                   onClick={handlePin}
@@ -519,41 +573,15 @@ export function MeetingHeader({
         onConfirm={handleDelete}
         onCancel={() => setShowDeleteDialog(false)}
       />
+
+      <RecipesPanel
+        meetingId={meetingId}
+        meetingTitle={meeting.title}
+        isOpen={recipesOpen}
+        onClose={() => setRecipesOpen(false)}
+      />
     </>
   );
 }
 
-/** Extract plain text from TipTap JSON content for markdown export */
-function extractTextFromTiptap(doc: Record<string, unknown>): string {
-  const lines: string[] = [];
-  const content = doc.content as Array<Record<string, unknown>> | undefined;
-  if (!content) return "";
 
-  for (const node of content) {
-    if (node.type === "paragraph") {
-      const textContent = (node.content as Array<{ text?: string }> | undefined)
-        ?.map((c) => c.text || "")
-        .join("") || "";
-      lines.push(textContent);
-    } else if (node.type === "bulletList") {
-      const items = node.content as Array<Record<string, unknown>> | undefined;
-      if (items) {
-        for (const item of items) {
-          const paraContent = (item.content as Array<Record<string, unknown>> | undefined)?.[0];
-          const text = (paraContent?.content as Array<{ text?: string }> | undefined)
-            ?.map((c) => c.text || "")
-            .join("") || "";
-          lines.push(`- ${text}`);
-        }
-      }
-    } else if (node.type === "heading") {
-      const level = (node.attrs as Record<string, unknown>)?.level || 1;
-      const text = (node.content as Array<{ text?: string }> | undefined)
-        ?.map((c) => c.text || "")
-        .join("") || "";
-      lines.push(`${"#".repeat(level as number)} ${text}`);
-    }
-  }
-
-  return lines.join("\n");
-}

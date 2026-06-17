@@ -3,8 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { RefreshCw, Mic, Globe, Play, Download, Check, Loader2, Trash2, User } from "lucide-react";
 import { ipc, ModelInfo } from "../../lib/ipc";
+import { announce } from "../../lib/announce";
+import { toUserMessage } from "../../lib/errors";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "../../stores/toastStore";
+import { ConfirmDialog } from "../shared/ConfirmDialog";
 import { Toggle } from "../shared/Toggle";
 import {
   InlineSettingsStatus,
@@ -12,6 +15,7 @@ import {
   SettingsStatusBadge,
   SettingsSubsectionHeader,
   primarySettingsButtonClass,
+  primarySettingsButtonCompactClass,
   secondarySettingsButtonClass,
   settingsInputClass,
 } from "./settingsUi";
@@ -84,15 +88,181 @@ export function AudioSettings() {
     queryFn: () => ipc.getSetting("noise_cancellation"),
   });
 
+  // Transcription engine (plan v9 #12): whisper default; Apple Speech only
+  // selectable when the macOS 26+ SpeechTranscriber stack is present.
+  const { data: speechEngineAvailable = false } = useQuery({
+    queryKey: ["speech-engine-available"],
+    queryFn: ipc.speechEngineAvailable,
+    retry: false,
+    staleTime: Infinity,
+  });
+  const { data: savedEngine } = useQuery({
+    queryKey: ["setting", "transcription_engine"],
+    queryFn: () => ipc.getSetting("transcription_engine"),
+  });
+  const transcriptionEngine = savedEngine === "apple" ? "apple" : "whisper";
+  const handleEngineChange = async (engine: string) => {
+    await ipc.setSetting("transcription_engine", engine);
+    queryClient.invalidateQueries({ queryKey: ["setting", "transcription_engine"] });
+    toast.success(
+      engine === "apple"
+        ? "Apple Speech engine selected for imports and re-transcription"
+        : "Whisper engine selected",
+    );
+  };
+
+  const { data: savedStereoRecording } = useQuery({
+    queryKey: ["setting", "stereo_recording"],
+    queryFn: () => ipc.getSetting("stereo_recording"),
+  });
+  const stereoRecording = savedStereoRecording === "true";
+  const handleStereoRecordingToggle = async () => {
+    const on = !stereoRecording;
+    await ipc.setSetting("stereo_recording", on ? "true" : "false");
+    queryClient.invalidateQueries({ queryKey: ["setting", "stereo_recording"] });
+    toast.success(
+      on
+        ? "Stereo from your next recording — you left, them right"
+        : "Back to mono from your next recording",
+    );
+  };
+
+  const { data: savedAccuracyPass } = useQuery({
+    queryKey: ["setting", "accuracy_pass"],
+    queryFn: () => ipc.getSetting("accuracy_pass"),
+  });
+  const accuracyPass = savedAccuracyPass !== "false"; // default on
+  const handleAccuracyPassToggle = async () => {
+    const on = !accuracyPass;
+    await ipc.setSetting("accuracy_pass", on ? "true" : "false");
+    queryClient.invalidateQueries({ queryKey: ["setting", "accuracy_pass"] });
+    toast.success(
+      on
+        ? "Recordings get a full-quality re-decode after they finish"
+        : "Accuracy pass off — transcripts keep the live decode",
+    );
+  };
+
+  const { data: savedAutoDiarize } = useQuery({
+    queryKey: ["setting", "auto_diarize"],
+    queryFn: () => ipc.getSetting("auto_diarize"),
+  });
+  const autoDiarize = savedAutoDiarize !== "false"; // default on
+  const handleAutoDiarizeToggle = async () => {
+    const on = !autoDiarize;
+    await ipc.setSetting("auto_diarize", on ? "true" : "false");
+    queryClient.invalidateQueries({ queryKey: ["setting", "auto_diarize"] });
+    toast.success(
+      on
+        ? "Speakers are detected — and named from your voice profiles — after each recording"
+        : "Automatic speaker detection off — use Re-detect in the Speakers panel",
+    );
+  };
+
+  const { data: savedEchoCancellation } = useQuery({
+    queryKey: ["setting", "echo_cancellation"],
+    queryFn: () => ipc.getSetting("echo_cancellation"),
+  });
+  const echoCancellation = savedEchoCancellation === "true";
+  const handleEchoCancellationToggle = async () => {
+    const on = !echoCancellation;
+    await ipc.setSetting("echo_cancellation", on ? "true" : "false");
+    queryClient.invalidateQueries({ queryKey: ["setting", "echo_cancellation"] });
+    toast.success(
+      on
+        ? "Echo cancellation from your next recording"
+        : "Echo cancellation off from your next recording",
+    );
+  };
+
+  const { data: callDetection = "" } = useQuery({
+    queryKey: ["setting", "call_detection"],
+    queryFn: () => ipc.getSetting("call_detection").then((v) => v ?? ""),
+  });
+
+  const { data: vadReady = false, refetch: refetchVad } = useQuery({
+    queryKey: ["vad-model-ready"],
+    queryFn: ipc.vadModelReady,
+  });
+  const [downloadingVad, setDownloadingVad] = useState(false);
+  const handleDownloadVad = async () => {
+    setDownloadingVad(true);
+    try {
+      await ipc.downloadVadModel();
+      await refetchVad();
+      toast.success("Voice activity filter active from your next recording");
+    } catch (e) {
+      toast.error(toUserMessage(e), "Download failed");
+    } finally {
+      setDownloadingVad(false);
+    }
+  };
+
+  const { data: savedTopicTrackers = "" } = useQuery({
+    queryKey: ["setting", "topic_trackers"],
+    queryFn: () => ipc.getSetting("topic_trackers").then((v) => v ?? ""),
+  });
+  const topicDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleTopicTrackersChange = (value: string) => {
+    if (topicDebounceRef.current) clearTimeout(topicDebounceRef.current);
+    topicDebounceRef.current = setTimeout(async () => {
+      await ipc.setSetting("topic_trackers", value);
+      queryClient.invalidateQueries({ queryKey: ["setting", "topic_trackers"] });
+    }, 600);
+  };
+
+  const handleCallDetectionChange = async (on: boolean) => {
+    await ipc.setSetting("call_detection", on ? "true" : "false");
+    queryClient.invalidateQueries({ queryKey: ["setting", "call_detection"] });
+    toast.success(on ? "Call detection on" : "Call detection off");
+  };
+
   const { data: savedCaptureSystemAudio } = useQuery({
     queryKey: ["setting", "capture_system_audio"],
     queryFn: () => ipc.getSetting("capture_system_audio"),
   });
 
+  // Live Screen Recording permission state. Without it the system-audio tap
+  // runs but produces only silence, so we surface the status (and a Grant
+  // shortcut) right next to the toggle.
+  const { data: hasSystemAudioPermission, refetch: refetchSystemAudioPermission } =
+    useQuery({
+      queryKey: ["system-audio-permission"],
+      queryFn: ipc.checkSystemAudioPermission,
+      retry: false,
+    });
+
+  const handleGrantSystemAudio = async () => {
+    try {
+      await ipc.requestSystemAudioPermission();
+    } catch {
+      // Best effort — fall through to opening System Settings.
+    }
+    try {
+      await ipc.openUrl(
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+      );
+    } catch {
+      // Ignore — user can open System Settings manually.
+    }
+    await refetchSystemAudioPermission();
+  };
+
   const { data: savedCustomVocabulary = "" } = useQuery({
     queryKey: ["setting", "custom_vocabulary"],
     queryFn: () => ipc.getSetting("custom_vocabulary").then((v) => v ?? ""),
   });
+
+  const { data: correctionRules = [] } = useQuery({
+    queryKey: ["correction-rules"],
+    queryFn: () => import("../../lib/correctionRules").then((m) => m.loadCorrectionRules()),
+  });
+  const handleRemoveRule = async (find: string) => {
+    const { removeCorrectionRule } = await import("../../lib/correctionRules");
+    await removeCorrectionRule(find);
+    queryClient.invalidateQueries({ queryKey: ["correction-rules"] });
+    toast.success("Rule removed — future transcripts keep the raw wording");
+  };
 
   const vocabDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleCustomVocabularyChange = (value: string) => {
@@ -161,7 +331,7 @@ export function AudioSettings() {
       queryClient.invalidateQueries({ queryKey: ["whisper-models"] });
       toast.success("Model downloaded successfully");
     } catch (e) {
-      toast.error("Download failed: " + String(e));
+      toast.error(toUserMessage(e), "Download failed");
     } finally {
       setDownloading(null);
       setDownloadProgress((prev) => {
@@ -283,9 +453,42 @@ export function AudioSettings() {
           }
         />
 
+        {/* Engine Picker (plan v9 #12) */}
+        <div className="mb-4">
+          <label className="text-xs text-text-muted block mb-1.5">Engine</label>
+          <select
+            value={transcriptionEngine}
+            onChange={(e) => handleEngineChange(e.target.value)}
+            className={`${settingsInputClass} w-full`}
+            aria-label="Transcription engine"
+          >
+            <option value="whisper">Whisper (default)</option>
+            <option
+              value="apple"
+              disabled={!speechEngineAvailable}
+              title={
+                speechEngineAvailable
+                  ? undefined
+                  : "Requires macOS 26 or later with Apple's speech model installed"
+              }
+            >
+              Apple Speech (macOS 26+, beta)
+            </option>
+          </select>
+          <p className="text-xs text-text-muted mt-1.5">
+            {transcriptionEngine === "apple"
+              ? "Apple's on-device engine — instant, no model download. Applies to imports and re-transcription in this version; live transcription still uses the Whisper model below."
+              : speechEngineAvailable
+                ? "Whisper runs fully on-device with the model below. Apple Speech (beta) is also available on this Mac — zero download, much faster for imports and re-transcription."
+                : "Whisper runs fully on-device with the model below. Apple Speech requires macOS 26 or later."}
+          </p>
+        </div>
+
         {/* Model Picker */}
         <div className="mb-4">
-          <label className="text-xs text-text-muted block mb-1.5">Model</label>
+          <label className="text-xs text-text-muted block mb-1.5">
+            {transcriptionEngine === "apple" ? "Whisper model (live transcription)" : "Model"}
+          </label>
           {whisperModels.length > 0 ? (
             <div className="space-y-2">
               {whisperModels.map((model) => {
@@ -323,7 +526,7 @@ export function AudioSettings() {
                         <div className="flex items-center gap-2 min-w-[80px]">
                           <Loader2 size={11} className="animate-spin text-accent shrink-0" />
                           <div className="flex flex-col gap-0.5 flex-1">
-                            <span className="text-[10px] text-accent font-mono text-right">
+                            <span className="text-footnote text-accent font-mono text-right">
                               {progress !== undefined ? `${Math.round(progress)}%` : "…"}
                             </span>
                             <div className="h-1 bg-bg-hover rounded-full overflow-hidden">
@@ -338,7 +541,7 @@ export function AudioSettings() {
                         <button
                           onClick={() => handleDownloadModel(model.id)}
                           disabled={!!downloading}
-                          className={`${primarySettingsButtonClass} min-h-8 px-2 py-1 text-[11px]`}
+                          className={`${primarySettingsButtonCompactClass}`}
                         >
                           <Download size={11} />
                           Download
@@ -412,9 +615,10 @@ export function AudioSettings() {
           </select>
         </div>
 
-        {/* System Audio Toggle */}
-        <div className="space-y-2">
-          <div className="flex items-start gap-4 p-3 rounded-lg border border-border bg-bg-tertiary">
+        {/* Capture toggles — one grouped list (UI review #2: every toggle
+            was its own full-width card; related switches read as one set) */}
+        <div className="ios-group">
+          <div className="ios-row !items-start">
             <div className="flex-1 min-w-0">
               <span className="text-sm font-medium text-text-primary">Capture system audio</span>
               <p className="text-xs text-text-muted mt-0.5">
@@ -422,19 +626,112 @@ export function AudioSettings() {
                 {captureSystemAudio === false && " If prompted, grant access in System Settings — macOS will restart the app automatically."}
               </p>
             </div>
-            <Toggle enabled={captureSystemAudio} onChange={handleCaptureSystemAudioToggle} />
+            <Toggle label="Capture system audio" enabled={captureSystemAudio} onChange={handleCaptureSystemAudioToggle} />
           </div>
 
+          {/* Permission status — only relevant while capture is enabled. */}
+          {captureSystemAudio && hasSystemAudioPermission === false && (
+            <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-recording/30 bg-recording/5">
+              <p className="text-xs text-text-secondary">
+                <span className="font-medium text-recording">
+                  Screen Recording permission not granted.
+                </span>{" "}
+                System audio won&apos;t be recorded until you enable it (a restart
+                may be required).
+              </p>
+              <button
+                onClick={handleGrantSystemAudio}
+                className="shrink-0 px-2.5 py-1 text-xs rounded-md font-medium bg-accent hover:bg-accent-hover text-white transition-colors"
+              >
+                Grant
+              </button>
+            </div>
+          )}
+          {captureSystemAudio && hasSystemAudioPermission === true && (
+            <p className="px-3 text-xs text-text-muted">
+              <Check size={12} className="inline -mt-0.5 mr-1 text-green-500" />
+              Screen Recording permission granted — system audio will be captured.
+            </p>
+          )}
+
           {/* Noise Cancellation Toggle */}
-          <div className="flex items-start gap-4 p-3 rounded-lg border border-border bg-bg-tertiary">
+          <div className="ios-row !items-start">
             <div className="flex-1 min-w-0">
               <span className="text-sm font-medium text-text-primary">Noise cancellation</span>
               <p className="text-xs text-text-muted mt-0.5">Reduce background noise before transcription</p>
             </div>
-            <Toggle enabled={noiseCancellation} onChange={handleNoiseCancellationToggle} />
+            <Toggle label="Noise cancellation" enabled={noiseCancellation} onChange={handleNoiseCancellationToggle} />
+          </div>
+
+          {/* Stereo recording (plan v9 #9) */}
+          <div className="ios-row !items-start">
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium text-text-primary">Stereo recording</span>
+              <p className="text-xs text-text-muted mt-0.5">
+                Your mic on the left channel, everyone else on the right — playback you can
+                lateralize. Applies from the next recording; live transcription is
+                unaffected, and stereo files downmix automatically when re-transcribed.
+              </p>
+            </div>
+            <Toggle label="Stereo recording" enabled={stereoRecording} onChange={handleStereoRecordingToggle} />
+          </div>
+
+          {/* Echo cancellation (plan v9 #2) */}
+          <div className="ios-row !items-start">
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium text-text-primary">
+                Echo cancellation (experimental)
+              </span>
+              <p className="text-xs text-text-muted mt-0.5">
+                For meetings on speakers without headphones. Uses the system
+                voice-processing unit; applies from the next recording. Custom mic
+                selection falls back to standard capture.
+              </p>
+            </div>
+            <Toggle label="Echo cancellation" enabled={echoCancellation} onChange={handleEchoCancellationToggle} />
+          </div>
+
+          {/* Accuracy pass (plan v10 #3) */}
+          <div className="ios-row !items-start">
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium text-text-primary">Accuracy pass</span>
+              <p className="text-xs text-text-muted mt-0.5">
+                After a recording finishes, re-transcribe the whole file in the
+                background with full context — better punctuation and fewer
+                misheard words. Your edits always win if they land first.
+              </p>
+            </div>
+            <Toggle label="Accuracy pass" enabled={accuracyPass} onChange={handleAccuracyPassToggle} />
+          </div>
+
+          {/* Auto-diarize + auto-name (plan v10 #1) */}
+          <div className="ios-row !items-start">
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium text-text-primary">
+                Detect speakers automatically
+              </span>
+              <p className="text-xs text-text-muted mt-0.5">
+                After a recording finishes, separate who said what in the
+                background. Voices that clearly match a saved voice profile are
+                named for you — with an Undo. Needs the speaker models (first
+                Re-detect downloads them); all matching stays on this Mac.
+              </p>
+            </div>
+            <Toggle label="Detect speakers automatically" enabled={autoDiarize} onChange={handleAutoDiarizeToggle} />
           </div>
         </div>
       </section>
+      {/* Power-user features under one disclosure (UI review #2: the page
+          was a 2,000px wall mixing daily settings with tuning knobs). */}
+      <details className="group/adv">
+        <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-1 py-2 text-sm font-semibold text-text-secondary transition-colors hover:text-text-primary [&::-webkit-details-marker]:hidden">
+          <span className="inline-block transition-transform group-open/adv:rotate-90">›</span>
+          Advanced
+          <span className="text-xs font-normal text-text-muted">
+            vocabulary, correction rules, voice filter, topic trackers, call detection
+          </span>
+        </summary>
+        <div className="space-y-6 pt-2">
       {/* Custom Vocabulary */}
       <section>
         <SettingsSubsectionHeader
@@ -451,6 +748,96 @@ export function AudioSettings() {
         />
       </section>
 
+      {/* Correction rules (plan v10 #5) */}
+      <section>
+        <SettingsSubsectionHeader
+          title="Correction Rules"
+          description='Fixes applied to every future transcript. Add one from the transcript drawer: replace a misheard word, then choose "Always make this fix".'
+        />
+        {correctionRules.length === 0 ? (
+          <p className="text-xs text-text-muted">No rules yet.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {correctionRules.map((r) => (
+              <li
+                key={r.find}
+                className="card flex items-center justify-between gap-3 px-3 py-1.5"
+              >
+                <span className="min-w-0 truncate text-xs text-text-primary">
+                  “{r.find}” → “{r.replace}”
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveRule(r.find)}
+                  aria-label={`Remove rule for ${r.find}`}
+                  className="shrink-0 text-text-muted hover:text-text-primary"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* VAD gate */}
+      <section>
+        <SettingsSubsectionHeader
+          title="Voice Activity Filter"
+          description="A tiny on-device model (~1 MB) that screens out non-speech audio before transcription — fewer phantom phrases from keyboard noise, music, and silence."
+        />
+        {vadReady ? (
+          <InlineSettingsStatus tone="ok" title="Active" message="Non-speech audio is filtered out before transcription" />
+        ) : (
+          <button
+            onClick={handleDownloadVad}
+            disabled={downloadingVad}
+            className={secondarySettingsButtonClass}
+          >
+            {downloadingVad ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+            Download filter model
+          </button>
+        )}
+      </section>
+
+      {/* Topic trackers */}
+      <section>
+        <SettingsSubsectionHeader
+          title="Topic Trackers"
+          description="Terms to track across every transcript — pricing, a project name, a competitor. They appear as clickable counters in the transcript drawer. Comma-separated."
+        />
+        <textarea
+          key={savedTopicTrackers}
+          defaultValue={savedTopicTrackers}
+          onChange={(e) => handleTopicTrackersChange(e.target.value)}
+          placeholder="E.g. pricing, Project Dolfin, churn…"
+          rows={2}
+          className={`${settingsInputClass} w-full resize-none`}
+        />
+      </section>
+
+      {/* Call detection */}
+      <section>
+        <SettingsSubsectionHeader
+          title="Call Detection"
+          description="Get a nudge when a meeting app starts using your microphone and you're not recording. Only which app uses the mic is checked — never any audio."
+        />
+        <label className="flex items-start gap-2.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={callDetection !== "false"}
+            onChange={(e) => handleCallDetectionChange(e.target.checked)}
+            className="mt-0.5 accent-[var(--accent)]"
+          />
+          <span className="text-xs text-text-muted">
+            Notify me when Zoom, Teams, my browser, or another call app goes live
+          </span>
+        </label>
+      </section>
+
+        </div>
+      </details>
+
       {/* Speaker Profiles Section */}
       <section>
         <SettingsSubsectionHeader
@@ -463,32 +850,119 @@ export function AudioSettings() {
   );
 }
 
-/** Speaker profiles — list, add, delete */
+/** Speaker profiles — list, add, delete; multi-select for bulk delete
+ *  (user request: "audio samples — give that bulk edit ability"). */
 function SpeakerProfilesSection() {
   const queryClient = useQueryClient();
   const [showDialog, setShowDialog] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const { data: profiles = [] } = useQuery({
     queryKey: ["voice-profiles"],
     queryFn: ipc.listVoiceProfiles,
   });
 
+  // Deletes are irreversible (the sample WAV is removed) — confirm both
+  // paths (deep review P2).
+  const [confirmDelete, setConfirmDelete] = useState<{ kind: "one"; id: string; name: string } | { kind: "bulk" } | null>(null);
   const handleDelete = async (id: string) => {
     await ipc.deleteVoiceProfile(id);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
     queryClient.invalidateQueries({ queryKey: ["voice-profiles"] });
     toast.success("Voice profile deleted");
   };
 
+  const toggleSelected = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const deleteSelected = async () => {
+    if (bulkBusy || selected.size === 0) return;
+    setBulkBusy(true);
+    let ok = 0;
+    const failed = new Set<string>();
+    for (const id of selected) {
+      try {
+        await ipc.deleteVoiceProfile(id);
+        ok++;
+      } catch {
+        failed.add(id);
+      }
+    }
+    queryClient.invalidateQueries({ queryKey: ["voice-profiles"] });
+    setSelected(failed);
+    setBulkBusy(false);
+    if (failed.size > 0) {
+      toast.error(`${ok} deleted — ${failed.size} couldn't be removed (still selected)`);
+    } else {
+      toast.success(`${ok} voice profile${ok === 1 ? "" : "s"} deleted`);
+    }
+  };
+
+  const allSelected = profiles.length > 0 && selected.size === profiles.length;
+  const toggleSelectAll = () => {
+    setSelected(allSelected ? new Set() : new Set(profiles.map((p) => p.id)));
+  };
+
   return (
     <div className="space-y-2">
+      {profiles.length > 1 && (
+        <label className="flex w-fit cursor-pointer items-center gap-2 px-1 text-xs text-text-secondary">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            onChange={toggleSelectAll}
+            aria-label="Select all voice profiles"
+            className="h-3.5 w-3.5 accent-[var(--accent)]"
+          />
+          Select all
+        </label>
+      )}
+      {selected.size > 0 && (
+        <div className="card flex items-center gap-2 px-3 py-2">
+          <span className="text-xs text-text-secondary">{selected.size} selected</span>
+          <div className="flex-1" />
+          <button
+            onClick={() => setConfirmDelete({ kind: "bulk" })}
+            disabled={bulkBusy}
+            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-recording transition-colors hover:bg-recording/10 disabled:opacity-50"
+          >
+            <Trash2 size={12} />
+            Delete selected
+          </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="rounded-md px-2 py-1 text-xs text-text-muted transition-colors hover:text-text-primary"
+          >
+            Clear
+          </button>
+        </div>
+      )}
       {profiles.length === 0 ? (
         <p className="text-xs text-text-muted py-2">No voice profiles saved yet.</p>
       ) : (
         profiles.map((p) => (
           <div
             key={p.id}
-            className="flex items-center gap-3 p-3 rounded-lg border border-border bg-bg-tertiary"
+            className="card flex items-center gap-3 p-3"
           >
+            <input
+              type="checkbox"
+              checked={selected.has(p.id)}
+              onChange={() => toggleSelected(p.id)}
+              aria-label={`Select voice profile ${p.speaker_name}`}
+              className="h-3.5 w-3.5 shrink-0 accent-[var(--accent)]"
+            />
             <div className="w-7 h-7 rounded-full bg-accent/10 text-accent flex items-center justify-center shrink-0">
               <User size={13} />
             </div>
@@ -496,10 +970,10 @@ function SpeakerProfilesSection() {
               <span className="text-sm font-medium text-text-primary truncate block">
                 {p.speaker_name}
               </span>
-              <span className="text-[10px] text-text-muted">Voice sample recorded</span>
+              <span className="text-footnote text-text-muted">Voice sample recorded</span>
             </div>
             <button
-              onClick={() => handleDelete(p.id)}
+              onClick={() => setConfirmDelete({ kind: "one", id: p.id, name: p.speaker_name })}
               className="p-1.5 rounded-md text-text-muted hover:text-recording hover:bg-recording/10 transition-colors"
               title="Delete profile"
               aria-label={`Delete voice profile ${p.speaker_name}`}
@@ -516,6 +990,26 @@ function SpeakerProfilesSection() {
         <Mic size={14} />
         + Record voice sample
       </button>
+      {confirmDelete && (
+        <ConfirmDialog
+          open={true}
+          title="Delete voice profile?"
+          message={
+            confirmDelete.kind === "one"
+              ? `“${confirmDelete.name}” and its voice sample will be deleted. Speakers already named in past meetings keep their names; future recordings won't auto-recognize this voice.`
+              : `${selected.size} voice profile${selected.size !== 1 ? "s" : ""} and their samples will be deleted. This can't be undone.`
+          }
+          confirmLabel="Delete"
+          variant="danger"
+          onConfirm={() => {
+            const c = confirmDelete;
+            setConfirmDelete(null);
+            if (c.kind === "one") void handleDelete(c.id);
+            else void deleteSelected();
+          }}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
       {showDialog && (
         <RecordVoiceDialog
           onClose={() => setShowDialog(false)}
@@ -562,10 +1056,16 @@ function RecordVoiceDialog({ onClose, onSaved }: { onClose: () => void; onSaved:
       setState("recording");
       let remaining = 5;
       setCountdown(remaining);
+      // Spoken progress for the visual-only "Recording... Ns" row. Every
+      // second would be chatty over a 5s clip, so: start + final 3 ticks.
+      announce("Recording voice sample — 5 seconds. Speak normally.");
 
       intervalRef.current = setInterval(async () => {
         remaining--;
         setCountdown(remaining);
+        if (remaining > 0 && remaining <= 3) {
+          announce(`${remaining} second${remaining === 1 ? "" : "s"} left`);
+        }
         if (remaining <= 0) {
           if (intervalRef.current) clearInterval(intervalRef.current);
           processor.disconnect();
@@ -589,6 +1089,7 @@ function RecordVoiceDialog({ onClose, onSaved }: { onClose: () => void; onSaved:
           audioCtx.close();
 
           setState("saving");
+          announce("Recording finished — saving voice profile…");
           try {
             await ipc.saveVoiceProfile(name.trim(), Array.from(resampled));
             toast.success(`Voice profile "${name.trim()}" saved`);
@@ -622,7 +1123,7 @@ function RecordVoiceDialog({ onClose, onSaved }: { onClose: () => void; onSaved:
         className={`${settingsInputClass} w-full disabled:opacity-50`}
       />
 
-      {error && <p className="text-xs text-recording">{error}</p>}
+      {error && <p role="alert" className="text-xs text-recording">{error}</p>}
 
       <div className="flex gap-2">
         {state === "idle" && (
@@ -632,7 +1133,7 @@ function RecordVoiceDialog({ onClose, onSaved }: { onClose: () => void; onSaved:
               disabled={!name.trim()}
               className={primarySettingsButtonClass}
             >
-              <Mic size={13} />
+              <Mic size={14} />
               Start recording
             </button>
             <button
@@ -748,7 +1249,7 @@ function MicrophoneTest() {
     <button
       onClick={handleTest}
       disabled={state !== "idle"}
-      className={`${secondarySettingsButtonClass} disabled:opacity-60`}
+      className={`${secondarySettingsButtonClass}`}
     >
       {state === "idle" && (
         <>

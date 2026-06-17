@@ -9,28 +9,55 @@ html, body, #root {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* One focus ring for the whole app (2026 rehaul): keyboard-only, accent,
+   offset so it never melts into a filled control. */
+:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb, 95, 184, 119), 0.75);
+  outline-offset: 2px;
+}
+/* Programmatic focus targets (route-change heading focus, pane jumps) are
+   not interactive — a ring there reads as a text input (it made the
+   onboarding step title look editable). */
+[tabindex="-1"]:focus-visible,
+.ProseMirror:focus-visible,
+.ProseMirror-focused,
+[contenteditable="true"]:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+/* Timestamps and counters line up (m:ss columns, durations). */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
 /* Subtle depth gradient — dark mode only */
 [data-theme="dark"] body {
   background-image:
-    radial-gradient(ellipse at 80% 0%, rgba(var(--accent-rgb), 0.06) 0%, transparent 45%),
-    radial-gradient(ellipse at 15% 100%, rgba(var(--accent-rgb), 0.03) 0%, transparent 40%);
+    radial-gradient(ellipse at 80% 0%, rgba(var(--accent-rgb), 0.09) 0%, transparent 48%),
+    radial-gradient(ellipse at 15% 100%, rgba(var(--accent-rgb), 0.045) 0%, transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 30%);
 }
 
 @theme {
-  /* Dark theme (default) — Glassmorphism */
-  --color-bg-primary: #07080c;
-  --color-bg-secondary: rgba(255, 255, 255, 0.025);
-  --color-bg-tertiary: rgba(255, 255, 255, 0.04);
-  --color-bg-hover: rgba(255, 255, 255, 0.05);
-  --color-bg-active: rgba(255, 255, 255, 0.08);
-  --color-border: rgba(255, 255, 255, 0.06);
-  --color-border-subtle: rgba(255, 255, 255, 0.04);
-  --color-text-primary: #ededed;
-  --color-text-secondary: #a0a0a0;
-  --color-text-muted: #5a5a5a;
-  --color-accent: #6366f1;
-  --color-accent-hover: #7c7ff3;
-  --color-accent-soft: rgba(99, 102, 241, 0.1);
+  /* Dark theme (default) — 2026 rehaul: lifted from void-black to a deep
+     slate so surfaces can actually layer; crisper hairlines; AA text
+     everywhere; the default accent is the brand's Forest green (brightened
+     for dark) instead of the off-brand indigo. The user's accent picker
+     overrides all four accent vars at runtime (themeStore). */
+  --color-bg-primary: #0c0e13;
+  --color-bg-secondary: rgba(255, 255, 255, 0.035);
+  --color-bg-tertiary: rgba(255, 255, 255, 0.055);
+  --color-bg-hover: rgba(255, 255, 255, 0.07);
+  --color-bg-active: rgba(255, 255, 255, 0.1);
+  --color-border: rgba(255, 255, 255, 0.09);
+  --color-border-subtle: rgba(255, 255, 255, 0.055);
+  --color-text-primary: #f2f3f5;
+  --color-text-secondary: #b4b8c0;
+  /* ≥4.5:1 on the dark backgrounds (WCAG AA) */
+  --color-text-muted: #8e939d;
+  --color-accent: #5fb877;
+  --color-accent-hover: #74ca8b;
+  --color-accent-soft: rgba(95, 184, 119, 0.12);
   --color-recording: #e54d4d;
   --color-recording-pulse: #f06060;
   --color-success: #10b981;
@@ -47,37 +74,61 @@ html, body, #root {
 
   /* Glass surface tokens (dark mode defaults) */
   --glass-rail-bg: rgba(255,255,255,0.03);
-  --glass-rail-border: rgba(255,255,255,0.08);
+  --glass-rail-border: rgba(255,255,255,0.09);
   --glass-panel-bg: rgba(255,255,255,0.04);
-  --glass-panel-border: rgba(255,255,255,0.08);
+  --glass-panel-border: rgba(255,255,255,0.09);
   --glass-header-border: rgba(255,255,255,0.05);
   --glass-search-bg: rgba(255,255,255,0.05);
   --glass-search-border: rgba(255,255,255,0.08);
-  --icon-color-dim: rgba(255,255,255,0.35);
-  --icon-color-bright: rgba(255,255,255,0.6);
+  --icon-color-dim: rgba(255,255,255,0.48);
+  --icon-color-bright: rgba(255,255,255,0.72);
   --icon-hover-bg: rgba(255,255,255,0.075);
-  --panel-label-color: rgba(255,255,255,0.42);
-  --section-label-color: rgba(255,255,255,0.26);
-  --meeting-title-color: rgba(255,255,255,0.82);
-  --meeting-meta-color: rgba(255,255,255,0.36);
-  --meeting-row-hover: rgba(255,255,255,0.055);
+  --panel-label-color: rgba(255,255,255,0.56);
+  --section-label-color: rgba(255,255,255,0.46);
+  --meeting-title-color: rgba(255,255,255,0.92);
+  --meeting-meta-color: rgba(255,255,255,0.52);
+  --meeting-row-hover: rgba(255,255,255,0.07);
   --meeting-unprocessed-today-bg: rgba(255, 200, 100, 0.06);
-  --popup-bg: #1a1b24;
-  --popup-border: rgba(255,255,255,0.13);
+
+  /* Data-viz hues (speaker accents, engagement/score scales) — named vars
+     so light theme can re-tune them without touching components. */
+  --viz-red: #f87171;
+  --viz-orange: #fb923c;
+  --viz-amber: #fbbf24;
+  --viz-lime: #a3e635;
+  --viz-green: #4ade80;
+  --viz-teal: #2dd4bf;
+  --viz-cyan: #22d3ee;
+  --viz-blue: #60a5fa;
+  --viz-indigo: #818cf8;
+  --viz-purple: #c084fc;
+  --viz-pink: #f472b6;
+  --viz-emerald: #34d399;
+  --viz-violet: #a78bfa;
+  --score-high: var(--viz-green);
+  --score-mid: var(--viz-amber);
+  --score-low: var(--viz-orange);
+  --score-poor: var(--viz-red);
+  --speaker-1: var(--viz-blue);
+  --speaker-2: var(--viz-emerald);
+  --speaker-3: var(--viz-amber);
+  --speaker-4: var(--viz-violet);
+  --speaker-5: var(--viz-pink);
+  --speaker-6: var(--viz-cyan);
   --toolbar-bg: rgba(255,255,255,0.04);
   --toolbar-border: rgba(255,255,255,0.085);
   --search-text-color: rgba(255,255,255,0.8);
-  --search-icon-color: rgba(255,255,255,0.3);
-  --pill-inactive-color: rgba(255,255,255,0.28);
+  --search-icon-color: rgba(255,255,255,0.42);
+  --pill-inactive-color: rgba(255,255,255,0.5);
   --pill-inactive-hover-bg: rgba(255,255,255,0.05);
-  --pill-inactive-hover-color: rgba(255,255,255,0.5);
+  --pill-inactive-hover-color: rgba(255,255,255,0.72);
   --scrollbar-thumb: rgba(255,255,255,0.12);
   --scrollbar-thumb-hover: rgba(255,255,255,0.22);
 }
 
 [data-theme="dark"] {
-  --notepad-bg: #1c1b1a;
-  --ai-text-color: #6b6a69;
+  --notepad-bg: #10131a; /* slate, not warm brown — fits the app ramp */
+  --ai-text-color: #9aa1ab; /* AA (was #6b6a69 ≈3.9:1) */
 }
 
 /* Light theme overrides */
@@ -91,7 +142,8 @@ html, body, #root {
   --color-border-subtle: #eaeaea;
   --color-text-primary: #1a1a1a;
   --color-text-secondary: #555555;
-  --color-text-muted: #999999;
+  /* ≥4.5:1 on the light backgrounds (WCAG AA); #999999 measured ~2.5:1 */
+  --color-text-muted: #6e6e6e;
   --color-accent: #4a8c5a;
   --color-accent-hover: #3d7a4d;
   --color-accent-soft: rgba(74, 140, 90, 0.08);
@@ -117,17 +169,16 @@ html, body, #root {
   --meeting-meta-color: rgba(0,0,0,0.52);
   --meeting-row-hover: rgba(0,0,0,0.055);
   --meeting-unprocessed-today-bg: rgba(220, 150, 30, 0.07);
-  --popup-bg: #ffffff;
-  --popup-border: rgba(0,0,0,0.13);
   --toolbar-bg: rgba(0,0,0,0.02);
   --toolbar-border: rgba(0,0,0,0.1);
   --search-text-color: rgba(0,0,0,0.8);
   --search-icon-color: rgba(0,0,0,0.4);
-  --pill-inactive-color: rgba(0,0,0,0.35);
+  --pill-inactive-color: rgba(0,0,0,0.56); /* AA on light pills (deep review) */
   --pill-inactive-hover-bg: rgba(0,0,0,0.05);
   --pill-inactive-hover-color: rgba(0,0,0,0.6);
   --notepad-bg: #faf9f7;
-  --ai-text-color: #8b8685;
+  --ai-text-color: #57534e;
+  --ai-text-weight: 400; /* 3.4:1 @300 failed AA on the primary reading surface */
   --scrollbar-thumb: rgba(0,0,0,0.15);
   --scrollbar-thumb-hover: rgba(0,0,0,0.28);
 }
@@ -150,15 +201,10 @@ html, body, #root {
 
 /* Selection */
 ::selection {
-  background: var(--color-accent);
-  color: white;
+  background: rgba(var(--accent-rgb, 95, 184, 119), 0.3);
 }
 
-/* Focus styles */
-*:focus-visible {
-  outline: 1.5px solid var(--color-accent);
-  outline-offset: 1px;
-}
+/* Focus styles: one global rule lives at the top of this file. */
 
 .icon-btn {
   display: inline-flex;
@@ -168,7 +214,7 @@ html, body, #root {
   align-items: center;
   justify-content: center;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-muted);
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
@@ -204,7 +250,7 @@ html, body, #root {
 }
 .skeleton {
   background: var(--color-bg-tertiary);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   animation: skeleton-pulse 1.5s ease-in-out infinite;
 }
 
@@ -217,10 +263,11 @@ html, body, #root {
   animation: fade-in 0.2s ease-out both;
 }
 
-/* TipTap Editor Styles */
+/* TipTap Editor Styles. Font size is a user setting (Settings → General):
+   --editor-font-size is set on <html> at startup and on change. */
 .tiptap {
   outline: none;
-  font-size: 16px;
+  font-size: var(--editor-font-size, 16px);
 }
 
 .tiptap p.is-editor-empty:first-child::before {
@@ -541,10 +588,30 @@ input:focus, select:focus, textarea:focus {
   color: var(--color-text-primary);
 }
 
-/* AI-enhanced text styling */
+/* AI-enhanced text styling. Generated notes read as a DOCUMENT, not a
+   draft — one step smaller and tighter than the typing surface (user
+   report: enriched output rendered large, and the spacing made it look
+   longer than it is). em-based heading/list rules below inherit this. */
 .ai-enhanced-text {
   font-weight: var(--ai-text-weight);
   color: var(--ai-text-color);
+}
+.ai-enhanced-text .tiptap {
+  font-size: calc(var(--editor-font-size, 16px) - 2px);
+}
+.ai-enhanced-text .tiptap p {
+  line-height: 1.5;
+}
+.ai-enhanced-text .tiptap h1 { margin: 0.7em 0 0.25em; }
+.ai-enhanced-text .tiptap h2 { margin: 0.6em 0 0.2em; }
+.ai-enhanced-text .tiptap h3 { margin: 0.5em 0 0.15em; }
+.ai-enhanced-text .tiptap ul,
+.ai-enhanced-text .tiptap ol {
+  margin: 0.25em 0;
+}
+.ai-enhanced-text .tiptap li {
+  margin: 0.1em 0;
+  line-height: 1.45;
 }
 
 .ai-enhanced-text h1,
@@ -561,11 +628,19 @@ input:focus, select:focus, textarea:focus {
 
 /* Enhance button gradient glow */
 .enhance-glow {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-hover));
+  box-shadow:
+    0 0 20px rgba(var(--accent-rgb, 95, 184, 119), 0.28),
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 .enhance-glow:hover {
-  box-shadow: 0 0 30px rgba(99, 102, 241, 0.5);
+  box-shadow:
+    0 0 32px rgba(var(--accent-rgb, 95, 184, 119), 0.45),
+    0 2px 6px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 /* Enhance button */
@@ -649,7 +724,7 @@ input:focus, select:focus, textarea:focus {
 /* Full-bleed notepad styles — borderless editor */
 .notepad-editor {
   background: var(--notepad-bg);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
 }
 
 .notepad-editor .tiptap {
@@ -659,7 +734,29 @@ input:focus, select:focus, textarea:focus {
 
 .notepad-editor .ProseMirror {
   min-height: calc(100vh - 160px);
-  padding: 2rem 0;
+  /* Typewriter-lite (plan v7 capture 3): generous bottom room so the
+     caret never rides the bottom edge during long capture — the 80/20
+     of typewriter scrolling without caret-centering machinery. The
+     small horizontal inset keeps text off the pane edge and on the
+     same axis as the toolbar glyphs (editor cleanup). */
+  padding: 1rem 7px 35vh; /* text on the toolbar glyph axis */
+  caret-color: var(--color-accent);
+}
+
+/* Pasted screenshots (plan v9 #13): inline but bounded — a full-res deck
+   slide must never swallow the page. Click does nothing fancy in v1. */
+.ProseMirror img[data-pasted-image] {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  width: auto;
+  margin: 0.5rem 0;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+}
+.ProseMirror img[data-pasted-image].ProseMirror-selectednode {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }
 
 /* Saved indicator fade */
@@ -770,9 +867,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* ===== NoteEditor toolbar bottom separator ===== */
-.notepad-editor .tiptap {
-  padding-top: 0.5rem;
-}
+
 
 /* ===== Enhancement animation overlay ===== */
 @keyframes line-appear {
@@ -1034,3 +1129,379 @@ mark.transcript-highlight {
 .tiptap-toggle-summary:focus { background: var(--color-bg-hover); }
 .tiptap-toggle-body { padding: 2px 0 4px 24px; }
 .tiptap-toggle:not([data-open]) > .tiptap-toggle-body { display: none; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Slickness layer — refined-minimal polish pass over the glass language.
+   Tokens first, then app-wide tactility, then chrome unification.
+   Appended last so it wins the cascade without touching call sites.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Elevation — three honest levels (2026 rehaul): hairline cards, floating
+     panels, modal surfaces. Dark shadows read as depth, not dirt. */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-3: 0 16px 48px rgba(0, 0, 0, 0.5);
+  /* Geometry scale — the app converges on these four radii */
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 13px;
+  --radius-full: 999px;
+  /* Motion — one snappy curve everywhere; nothing mushy */
+  --ease-snap: cubic-bezier(0.3, 0.7, 0.4, 1);
+  --t-fast: 0.14s var(--ease-snap);
+  --t-normal: 0.22s var(--ease-snap);
+  /* Depth */
+  --shadow-pop: 0 18px 40px -18px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+/* ── App-wide tactility: every control answers the hand ─────────────── */
+button,
+select,
+[role="button"] {
+  transition:
+    background-color var(--t-fast),
+    color var(--t-fast),
+    border-color var(--t-fast),
+    box-shadow var(--t-fast),
+    transform var(--t-fast),
+    opacity var(--t-fast);
+}
+button:active:not(:disabled),
+[role="button"]:active {
+  transform: scale(0.965);
+}
+
+/* (former duplicate global focus rule removed — it added a glow halo and
+   MUTATED border-radius on focus, visibly warping the editor area. The
+   single rule at the top of the file is authoritative.) */
+
+/* ── Scrollbars: quieter at rest, present in motion ──────────────────── */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.10);
+  border-radius: var(--radius-full);
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--accent-rgb), 0.45);
+  background-clip: padding-box;
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  background-clip: padding-box;
+}
+
+/* ── Floating chrome: dropdowns/popovers share one elevation language ── */
+.menu-dropdown,
+[role="dialog"] {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+}
+.menu-dropdown {
+  animation: pop-in 0.16s var(--ease-snap);
+  transform-origin: top left;
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ── Segmented pills: the active segment glows softly ────────────────── */
+.view-toggle-pill button.active {
+  box-shadow:
+    inset 0 0 0 1px rgba(var(--accent-rgb), 0.35),
+    0 0 14px rgba(var(--accent-rgb), 0.18);
+}
+
+/* ── Shell atmosphere: dual glow + barely-there grain for depth ──────── */
+.app-shell-glow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(700px 500px at -8% 108%, rgba(96, 165, 250, 0.05) 0%, transparent 62%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.022'/%3E%3C/svg%3E");
+}
+[data-theme="light"] .app-shell-glow::after {
+  display: none;
+}
+
+/* ── Inputs: focus feels intentional, not incidental ─────────────────── */
+input[type="text"]:focus,
+input[type="search"]:focus,
+textarea:focus {
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
+  transition: box-shadow var(--t-fast), border-color var(--t-fast);
+}
+
+/* ── Respect reduced motion: tactility yes, travel no ────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  button:active:not(:disabled),
+  [role="button"]:active {
+    transform: none;
+  }
+  .menu-dropdown {
+    animation: none;
+  }
+}
+
+/* ── Native feel: chrome is not a webpage ────────────────────────────── */
+/* Interactive chrome must not text-select mid-drag, and macOS buttons
+   use the arrow cursor — the hand pointer is a browser tell. Content
+   surfaces (editor, transcript, inputs) keep selection untouched. */
+button,
+[role="button"],
+[role="menuitem"],
+[role="tab"],
+select,
+summary,
+kbd,
+label {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+a,
+[data-tooltip] {
+  cursor: pointer;
+}
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+
+/* ── Type pattern: section label ─────────────────────────────────────────
+   The small uppercase group label used in dropdowns, panels, and overlays.
+   One class instead of per-component utility soup; first step of the
+   typography-scale consolidation. */
+.section-label {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+/* Action-item source chip — the verifiability anchor (plan rank 2) */
+.tiptap-action-item__source {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--color-accent);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.tiptap-action-item__source:hover {
+  background: rgba(var(--accent-rgb), 0.18);
+}
+
+/* ── Semantic type scale (plan rank 14) ──────────────────────────────────
+   Size+line-height only; color stays a per-use utility so existing
+   text-accent/text-recording/etc. keep winning. One tunable hierarchy:
+   caption = timestamps/meta rows, footnote = smallest chrome hints. */
+.text-body-sm {
+  font-size: 13px;
+  line-height: 1.45;
+}
+.text-caption {
+  font-size: 12px;
+  line-height: 1.35;
+}
+.text-footnote {
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+
+/* ── Accessibility (plan v6) ──────────────────────────────────────────── */
+
+/* VoiceOver concatenates adjacent blocks in contenteditable ("HeadingParagraph");
+   a zero-width space after each block restores boundaries (TipTap's own fix). */
+.tiptap :is(h1, h2, h3, p, li)::after {
+  content: "\200B";
+}
+
+/* macOS "Increase contrast" → solid borders and brighter secondary text. */
+@media (prefers-contrast: more) {
+  :root {
+    --color-border: rgba(255, 255, 255, 0.35);
+    --color-text-muted: #b8b8b8;
+    --color-text-secondary: #dcdcdc;
+  }
+  :root.light, [data-theme="light"] {
+    --color-border: rgba(0, 0, 0, 0.45);
+    --color-text-muted: #4a4a4a;
+    --color-text-secondary: #2e2e2e;
+  }
+}
+
+
+/* Floating glass (slickness pass): dialogs, palette, popovers sit on a
+   blurred, saturated pane instead of a flat fill — the content behind
+   stays present, the surface reads as physical. */
+.glass-float {
+  background: rgba(22, 25, 32, 0.78);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: var(--shadow-3), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+[data-theme="light"] .glass-float {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-3), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+/* Status dots that glow instead of sitting flat. */
+.dot-glow {
+  box-shadow: 0 0 6px currentColor;
+}
+
+/* Section kickers: small-caps label with a fading rule — replaces the
+   flat gray line. */
+.kicker-rule {
+  height: 1px;
+  background: linear-gradient(90deg, var(--color-border), transparent);
+}
+
+/* ===== Button grammar (2026 rehaul) ===== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast);
+}
+.btn-primary {
+  background: linear-gradient(180deg, var(--color-accent-hover), var(--color-accent));
+  color: #fff;
+  box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.btn-primary:hover {
+  filter: brightness(1.06);
+  transform: translateY(-0.5px);
+  box-shadow: var(--shadow-2), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.btn-secondary {
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+  background: transparent;
+}
+.btn-secondary:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.btn-ghost { color: var(--color-text-muted); background: transparent; }
+.btn-ghost:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+/* Size modifiers — 28px for dense toolbars, 40px for page-level CTAs
+   (.btn default is 32px). Use instead of per-site h-*\/px-* overrides. */
+.btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
+.btn-lg { height: 40px; padding: 0 16px; font-size: 14px; }
+
+/* Cards — one surface recipe instead of ad-hoc border+bg combos. */
+.card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.028));
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.045);
+}
+[data-theme="light"] .card {
+  background: linear-gradient(180deg, #ffffff, #fafafa);
+  box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+/* List-row select boxes: invisible until the row is hovered (2026 rehaul —
+   a faint square on every row read as visual noise at rest). Inline style
+   pins them fully visible while selection is active. */
+.row-checkbox { opacity: 0; }
+.group:hover .row-checkbox,
+.row-checkbox:focus-visible { opacity: 0.8; }
+
+
+/* ===== iOS polish pass ===== */
+
+/* Grouped inset list (iOS Settings): one continuous card, rows divided by
+   inset hairlines instead of each row carrying its own border. */
+.ios-group {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 14px;
+  box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  overflow: hidden;
+}
+[data-theme="light"] .ios-group {
+  background: #ffffff;
+  box-shadow: var(--shadow-1);
+}
+.ios-row {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  width: 100%;
+  text-align: left;
+  transition: background var(--t-fast);
+}
+.ios-row:hover { background: var(--color-bg-hover); }
+.ios-row + .ios-row { position: relative; }
+.ios-row + .ios-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50px;
+  right: 0;
+  height: 1px;
+  background: var(--color-border-subtle);
+}
+
+/* Colored icon chips (iOS Settings rows): a small tinted rounded square
+   carrying a white glyph — instant warmth in an otherwise monochrome UI. */
+.icon-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: #fff;
+  flex-shrink: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+.chip-gray   { background: linear-gradient(180deg, #9ba0a8, #7c828c); }
+.chip-green  { background: linear-gradient(180deg, #4cd964, #34a84e); }
+.chip-blue   { background: linear-gradient(180deg, #5aa2e8, #3d7fc4); }
+.chip-purple { background: linear-gradient(180deg, #b06fe0, #8d4bc0); }
+.chip-orange { background: linear-gradient(180deg, #ffab40, #e98a1d); }
+.chip-teal   { background: linear-gradient(180deg, #40c8d8, #28a4b4); }
+.chip-indigo { background: linear-gradient(180deg, #7a78ec, #5d5ad0); }
+.chip-red    { background: linear-gradient(180deg, #ff6b5e, #e04a3e); }
+.chip-pink   { background: linear-gradient(180deg, #ff6b9d, #e0457c); }

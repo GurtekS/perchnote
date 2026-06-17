@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -9,14 +9,17 @@ import {
   ExternalLink,
   Cloud,
   HardDrive,
+  Loader2,
   Sparkles,
 } from "lucide-react";
 import { ipc } from "../../lib/ipc";
+import { toUserMessage } from "../../lib/errors";
 import { toast } from "../../stores/toastStore";
 import {
   InlineSettingsStatus,
   SettingsSectionHeader,
   SettingsStatusBadge,
+  SettingsSubsectionHeader,
   primarySettingsButtonClass,
   secondarySettingsButtonClass,
   settingsInputClass,
@@ -66,7 +69,7 @@ export function AiSettings() {
       await ipc.setSetting(PROVIDER_SETTING, id);
       qc.invalidateQueries({ queryKey: ["setting", PROVIDER_SETTING] });
     } catch (e) {
-      toast.error(`Failed to switch provider: ${e}`);
+      toast.error(toUserMessage(e, "Couldn't switch the AI provider"));
     }
   };
 
@@ -74,7 +77,7 @@ export function AiSettings() {
     <div className="space-y-6">
       <SettingsSectionHeader
         title="AI"
-        description="Pick where note generation, chat, and speaker diarization run. Recording, transcription, and search continue to work without an AI provider."
+        description="Pick where note generation, chat, and speaker detection run. Recording, transcription, and search continue to work without an AI provider."
         badge={<SettingsStatusBadge tone={provider === "anthropic" ? "neutral" : "ok"}>{provider}</SettingsStatusBadge>}
       />
 
@@ -113,7 +116,262 @@ export function AiSettings() {
       {provider === "anthropic" && <AnthropicConfig />}
       {provider === "ollama"    && <OllamaConfig />}
       {provider === "apple"     && <AppleConfig />}
+
+      {/* How notes get generated — provider-independent behavior (moved
+          here from General, where it was a junk-drawer surprise). */}
+      <GenerationSection />
+
+      {/* Semantic recall backend (plan v10 #4) — independent of the
+          note-generation provider above. */}
+      <SemanticRecallSection />
     </div>
+  );
+}
+
+// ─── Generation behavior ─────────────────────────────────────────────────────
+
+function GenerationSection() {
+  const queryClient = useQueryClient();
+  const contextDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const { data: autoEnhance = "" } = useQuery({
+    queryKey: ["setting", "auto_enhance_on_complete"],
+    queryFn: () => ipc.getSetting("auto_enhance_on_complete").then((v) => v ?? ""),
+  });
+
+  const handleAutoEnhanceChange = async (on: boolean) => {
+    await ipc.setSetting("auto_enhance_on_complete", on ? "true" : "false");
+    queryClient.invalidateQueries({ queryKey: ["setting", "auto_enhance_on_complete"] });
+    toast.success(on ? "Instant recap on" : "Instant recap off");
+  };
+
+  const { data: autoTitle = "" } = useQuery({
+    queryKey: ["setting", "auto_title_on_complete"],
+    queryFn: () => ipc.getSetting("auto_title_on_complete").then((v) => v ?? ""),
+  });
+  const handleAutoTitleChange = async (on: boolean) => {
+    await ipc.setSetting("auto_title_on_complete", on ? "true" : "false");
+    queryClient.invalidateQueries({ queryKey: ["setting", "auto_title_on_complete"] });
+    toast.success(on ? "Auto-naming on" : "Auto-naming off");
+  };
+
+  const { data: ownTasksOnly = "" } = useQuery({
+    queryKey: ["setting", "tasks_own_only"],
+    queryFn: () => ipc.getSetting("tasks_own_only").then((v) => v ?? ""),
+  });
+  const handleOwnTasksChange = async (on: boolean) => {
+    await ipc.setSetting("tasks_own_only", on ? "true" : "false");
+    queryClient.invalidateQueries({ queryKey: ["setting", "tasks_own_only"] });
+  };
+
+  const { data: savedUserContext = "" } = useQuery({
+    queryKey: ["setting", "user_context"],
+    queryFn: () => ipc.getSetting("user_context").then((v) => v ?? ""),
+  });
+
+  const { data: contextAuto = "" } = useQuery({
+    queryKey: ["setting", "user_context_auto"],
+    queryFn: () => ipc.getSetting("user_context_auto").then((v) => v ?? ""),
+  });
+  const [generatingContext, setGeneratingContext] = useState(false);
+
+  const handleUserContextChange = (value: string) => {
+    if (contextDebounceRef.current) clearTimeout(contextDebounceRef.current);
+    contextDebounceRef.current = setTimeout(async () => {
+      await ipc.setSetting("user_context", value);
+      // A hand edit takes ownership: stop the weekly auto-refresh from
+      // overwriting what the user wrote.
+      await ipc.setSetting("user_context_auto", "false");
+      queryClient.invalidateQueries({ queryKey: ["setting", "user_context"] });
+      queryClient.invalidateQueries({ queryKey: ["setting", "user_context_auto"] });
+    }, 600);
+  };
+
+  const generateContextFromMeetings = async () => {
+    setGeneratingContext(true);
+    try {
+      const text = await ipc.generateUserContext();
+      // Flags before text — mirrors the backend ordering so an interrupted
+      // sequence re-generates next launch instead of freezing a half-state.
+      await ipc.setSetting("user_context_auto", "true");
+      await ipc.setSetting("user_context_generated_at", new Date().toISOString());
+      await ipc.setSetting("user_context", text);
+      queryClient.invalidateQueries({ queryKey: ["setting", "user_context"] });
+      queryClient.invalidateQueries({ queryKey: ["setting", "user_context_auto"] });
+      toast.success("About You generated from your meetings");
+    } catch (e) {
+      toast.error(toUserMessage(e));
+    } finally {
+      setGeneratingContext(false);
+    }
+  };
+
+  return (
+    <section className="space-y-5 border-t border-border pt-5">
+      <SettingsSubsectionHeader
+        title="Generation"
+        description="How AI notes get written — applies whichever provider runs them."
+      />
+
+      {/* Instant recap */}
+      <div>
+        <h4 className="text-sm font-medium text-text-primary mb-1">Instant recap</h4>
+        <label className="flex items-start gap-2.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={autoEnhance !== "false"}
+            onChange={(e) => handleAutoEnhanceChange(e.target.checked)}
+            className="mt-0.5 accent-[var(--accent)]"
+          />
+          <span className="text-xs text-text-muted">
+            Enhance notes automatically when a recording finishes, so the
+            summary and action items are waiting without a click. Uses your
+            configured AI provider.
+          </span>
+        </label>
+      </div>
+
+      {/* Auto-naming */}
+      <div>
+        <h4 className="text-sm font-medium text-text-primary mb-1">Auto-naming</h4>
+        <label className="flex items-start gap-2.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={autoTitle !== "false"}
+            onChange={(e) => handleAutoTitleChange(e.target.checked)}
+            className="mt-0.5 accent-[var(--accent)]"
+          />
+          <span className="text-xs text-text-muted">
+            Name untitled meetings from their transcript when a recording
+            finishes. Only placeholder titles like "Untitled Meeting" are
+            swapped — titles you typed are never touched, and there's an
+            Undo on the spot.
+          </span>
+        </label>
+      </div>
+
+      {/* Whose tasks */}
+      <div>
+        <h4 className="text-sm font-medium text-text-primary mb-1">My Tasks Only</h4>
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={ownTasksOnly !== "false"}
+            onChange={(e) => handleOwnTasksChange(e.target.checked)}
+            className="mt-0.5 accent-[var(--accent)]"
+          />
+          <span className="text-xs text-text-muted">
+            AI notes extract action items only for you — the person recording.
+            What others agreed to do stays in the summary, not your task list.
+          </span>
+        </label>
+      </div>
+
+      {/* About You */}
+      <div>
+        <h4 className="text-sm font-medium text-text-primary mb-1">About You</h4>
+        <p className="text-xs text-text-muted mb-3">
+          Add context about your role to improve AI note quality. For example: "Product manager at a B2B SaaS startup focused on enterprise deals."
+        </p>
+        <textarea
+          key={savedUserContext}
+          defaultValue={savedUserContext}
+          onChange={(e) => handleUserContextChange(e.target.value)}
+          placeholder="E.g. Senior engineer at Acme Corp, working on the payments team…"
+          rows={3}
+          aria-label="About You"
+          className="w-full bg-bg-tertiary text-text-primary text-sm rounded-lg px-3 py-2 border border-border focus:outline-none focus:border-accent resize-none placeholder:text-text-muted/50"
+        />
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={generateContextFromMeetings}
+            disabled={generatingContext}
+            title="Builds this from the titles, attendees, and AI notes of your recent meetings"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs text-text-secondary border border-border hover:bg-bg-hover hover:text-text-primary disabled:opacity-50"
+          >
+            {generatingContext ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+            Generate from my meetings
+          </button>
+          <span className="text-caption text-text-muted">
+            {contextAuto === "true"
+              ? "Auto-generated from your meetings; refreshes weekly. Editing it takes ownership."
+              : "Also fills itself in automatically once a few meetings have AI notes."}
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── Semantic recall ─────────────────────────────────────────────────────────
+
+const EMBEDDING_BACKEND_SETTING = "embedding_backend";
+
+interface EmbeddingStatus {
+  backend: "apple" | "ollama" | "off";
+  model: string | null;
+  setting: string;
+  apple_available: boolean;
+  apple_assets_installed: boolean;
+}
+
+function SemanticRecallSection() {
+  const qc = useQueryClient();
+  const { data: status } = useQuery({
+    queryKey: ["embedding-status"],
+    queryFn: () => invoke<EmbeddingStatus | null>("embedding_status"),
+    retry: false,
+  });
+
+  const pick = async (value: string) => {
+    try {
+      // "" = automatic (the backend treats unset/empty as auto-detect).
+      await ipc.setSetting(EMBEDDING_BACKEND_SETTING, value === "auto" ? "" : value);
+      qc.invalidateQueries({ queryKey: ["embedding-status"] });
+    } catch (e) {
+      toast.error(toUserMessage(e, "Couldn't switch semantic recall"));
+    }
+  };
+
+  const downloading =
+    status?.backend === "off" &&
+    status.setting !== "off" &&
+    status.apple_available &&
+    !status.apple_assets_installed;
+  const label = !status
+    ? "checking"
+    : status.backend === "apple"
+      ? "On — Apple on-device"
+      : status.backend === "ollama"
+        ? `On — Ollama (${status.model ?? "?"})`
+        : downloading
+          ? "Off — downloading Apple model"
+          : "Off";
+
+  return (
+    <section className="border-t border-border pt-5">
+      <SettingsSubsectionHeader
+        title="Semantic Recall"
+        description="Lets search and chat find meetings by meaning, not just keywords. Runs fully on-device; when off, search is keyword-only."
+        action={
+          <SettingsStatusBadge tone={!status || status.backend === "off" ? "neutral" : "ok"}>
+            {label}
+          </SettingsStatusBadge>
+        }
+      />
+      <select
+        value={status?.setting ?? "auto"}
+        onChange={(e) => pick(e.target.value)}
+        className={settingsInputClass}
+        aria-label="Semantic recall backend"
+      >
+        <option value="auto">Automatic (recommended)</option>
+        <option value="apple">Apple on-device</option>
+        <option value="ollama">Ollama</option>
+        <option value="off">Off</option>
+      </select>
+    </section>
   );
 }
 
@@ -221,7 +479,7 @@ function AnthropicConfig() {
       qc.invalidateQueries({ queryKey: ["setting", ANTHROPIC_KEY_SETTING] });
       toast.success("API key saved to Keychain");
     } catch (e) {
-      toast.error(`Failed to save key: ${e}`);
+      toast.error(toUserMessage(e, "Couldn't save the API key"));
     } finally {
       setSavingKey(false);
     }
@@ -334,7 +592,7 @@ function AnthropicConfig() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2">
                     <span className="text-sm font-medium text-text-primary">{m.display_name}</span>
-                    <span className="text-[10px] font-mono text-text-muted truncate">{m.id}</span>
+                    <span className="text-footnote font-mono text-text-muted truncate">{m.id}</span>
                   </div>
                   <div className="text-xs text-text-muted">{tierHint(m.id)}</div>
                 </div>
@@ -390,15 +648,21 @@ function OllamaConfig() {
 
   return (
     <div className="space-y-3 pl-6 border-l-2 border-accent/30">
+      <p className="m-0 text-xs text-text-muted">
+        Recommended: <code className="font-mono">qwen3:8b</code> (16&nbsp;GB Macs) ·{" "}
+        <code className="font-mono">qwen3:4b</code> at 8&nbsp;GB ·{" "}
+        <code className="font-mono">qwen3:30b-a3b</code> at 32&nbsp;GB. Prefer instruct
+        variants — "thinking" models can break structured notes output.
+      </p>
       {!running && (
         <div className="space-y-2 rounded-lg border border-warning/25 bg-warning/5 p-3 text-xs text-text-secondary">
           <div className="flex items-center gap-2 font-medium text-warning">
             <AlertCircle size={14} /> Ollama is not running
           </div>
           <p>Install Ollama (one-time):</p>
-          <pre className="font-mono text-[11px] bg-bg-tertiary p-2 rounded">brew install ollama
+          <pre className="font-mono text-caption bg-bg-tertiary p-2 rounded">brew install ollama
 ollama serve &amp;
-ollama pull llama3.2</pre>
+ollama pull qwen3:8b</pre>
           <p>
             Once <code className="font-mono">ollama serve</code> is running and
             you've pulled at least one model, this section will populate.
@@ -419,7 +683,7 @@ ollama pull llama3.2</pre>
           )}
           {models.length === 0 && !modelsError && (
             <p className="text-xs text-text-muted">
-              No models installed. Run <code className="font-mono">ollama pull llama3.2</code> in
+              No models installed. Run <code className="font-mono">ollama pull qwen3:8b</code> in
               your terminal, then come back here.
             </p>
           )}
@@ -476,7 +740,7 @@ function AppleConfig() {
         <InlineSettingsStatus
           tone="ok"
           title="Apple Intelligence available"
-          message="Note generation, chat, and diarization will run on Apple's on-device model."
+          message="Note generation, chat, and speaker detection will run on Apple's on-device model."
         />
       ) : (
         <InlineSettingsStatus
@@ -486,9 +750,9 @@ function AppleConfig() {
         />
       )}
       <p className="text-text-muted">
-        Apple's on-device model is good for chat and decent for diarization,
-        but it may miss subtle action items in long meetings. If quality
-        suffers, switch back to Anthropic or Ollama.
+        Apple's on-device model is good for chat and decent at telling
+        speakers apart, but it may miss subtle action items in long meetings.
+        If quality suffers, switch back to Anthropic or Ollama.
       </p>
     </div>
   );

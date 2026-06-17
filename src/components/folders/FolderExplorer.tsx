@@ -1,11 +1,12 @@
 // src/components/folders/FolderExplorer.tsx
-import { useEffect, useState } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Plus, FolderOpen, ChevronRight, ChevronDown } from "lucide-react";
 import { ipc, buildFolderTree, FolderNode } from "../../lib/ipc";
 import { FolderMeetings } from "./FolderMeetings";
 import { toast } from "../../stores/toastStore";
+import { toUserMessage } from "../../lib/errors";
 import { useThemeStore, generateFolderPalette, folderColorFromId } from "../../stores/themeStore";
 
 interface FolderExplorerProps {
@@ -35,47 +36,45 @@ function buildBreadcrumb(tree: FolderNode[], targetId: string): FolderNode[] {
 }
 
 /** Large Finder-style folder icon card */
-function FolderCard({
+function FolderRow({
   node,
   color,
+  lastActive,
   onOpen,
 }: {
   node: FolderNode;
   color: string;
+  lastActive: string | null;
   onOpen: () => void;
 }) {
+  const parts: string[] = [];
+  if (node.meeting_count > 0) parts.push(`${node.meeting_count} meeting${node.meeting_count === 1 ? "" : "s"}`);
+  if (node.children.length > 0) parts.push(`${node.children.length} folder${node.children.length === 1 ? "" : "s"}`);
+  if (lastActive) parts.push(`active ${lastActive}`);
   return (
     <button
       type="button"
-      className="group flex min-h-[104px] w-[96px] flex-col items-center gap-1.5 rounded-xl p-3 text-center transition-colors hover:bg-bg-hover focus-visible:bg-bg-hover"
+      className="ios-row"
       onClick={onOpen}
-      title={`Open ${node.name}`}
       aria-label={`Open ${node.name} folder`}
     >
-      {/* Folder icon */}
-      <div className="relative">
-        <svg width="56" height="48" viewBox="0 0 56 48" fill="none">
-          {/* folder back */}
-          <rect x="0" y="10" width="56" height="38" rx="5" fill={color} opacity="0.85" />
-          {/* tab */}
-          <path d="M0 10 Q0 6 4 6 L18 6 Q22 6 24 10 Z" fill={color} />
-          {/* folder front shine */}
-          <rect x="0" y="14" width="56" height="34" rx="5" fill={color} />
-          <rect x="0" y="14" width="56" height="10" rx="5" fill="white" opacity="0.12" />
-        </svg>
-        {node.meeting_count > 0 && (
-          <span className="absolute -bottom-0.5 -right-0.5 bg-bg-secondary border border-border text-[9px] text-text-muted px-1 rounded-full tabular-nums leading-4">
-            {node.meeting_count}
-          </span>
-        )}
-      </div>
-      {/* Name */}
-      <span className="max-w-[80px] break-words text-center text-[12px] font-medium leading-tight text-text-primary group-hover:text-accent group-focus-visible:text-accent">
-        {node.name}
+      <span
+        className="icon-chip"
+        style={{ background: `linear-gradient(180deg, ${color}, ${color}cc)` }}
+      >
+        <FolderOpen size={14} />
       </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm text-text-primary">{node.name}</span>
+        <span className="block text-xs text-text-muted">
+          {parts.length > 0 ? parts.join(" · ") : "Empty"}
+        </span>
+      </span>
+      <ChevronRight size={14} className="shrink-0 text-text-muted" />
     </button>
   );
 }
+
 
 /** Recursive row in the left tree panel */
 function TreeRow({
@@ -111,7 +110,7 @@ function TreeRow({
     <div>
       <div
         data-folder-drop={node.id}
-        className={`flex items-center gap-1.5 px-2 py-1 rounded-md select-none transition-colors text-[12px] group ${
+        className={`flex items-center gap-1.5 px-2 py-1 rounded-md select-none transition-colors text-caption group ${
           isActive
             ? "bg-accent/12 text-text-primary font-medium"
             : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
@@ -149,7 +148,7 @@ function TreeRow({
 
           {/* Meeting count badge */}
           {node.meeting_count > 0 && (
-            <span className={`text-[10px] tabular-nums px-1 rounded ${isActive ? "text-accent/70" : "text-text-muted/50"}`}>
+            <span className={`text-footnote tabular-nums px-1 rounded ${isActive ? "text-accent/70" : "text-text-muted/50"}`}>
               {node.meeting_count}
             </span>
           )}
@@ -209,13 +208,13 @@ function FolderTreePanel({
         <button
           type="button"
           onClick={() => onNavigate(null)}
-          className={`w-full flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider transition-colors ${
+          className={`w-full flex items-center justify-between text-caption font-semibold uppercase tracking-wider transition-colors ${
             activeFolderId === null ? "text-accent" : "text-text-muted hover:text-text-primary"
           }`}
         >
           <span>All Folders</span>
           {totalMeetings > 0 && (
-            <span className="text-[10px] text-text-muted/60 normal-case tracking-normal font-normal tabular-nums">
+            <span className="text-footnote text-text-muted/60 normal-case tracking-normal font-normal tabular-nums">
               {totalMeetings} meetings
             </span>
           )}
@@ -225,7 +224,7 @@ function FolderTreePanel({
       {/* Tree rows */}
       <div className="flex-1 overflow-y-auto py-1 px-1">
         {tree.length === 0 ? (
-          <p className="text-[11px] text-text-muted/40 px-3 py-2 italic">No folders</p>
+          <p className="text-caption text-text-muted/40 px-3 py-2 italic">No folders</p>
         ) : (
           tree.map(node => (
             <TreeRow
@@ -272,8 +271,33 @@ export function FolderExplorer({ activeFolderId }: FolderExplorerProps) {
       const f = await ipc.createFolder("New Folder", folderPalette[0], "folder", null);
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       navigate({ to: "/folders/$folderId", params: { folderId: f.id } });
-    } catch (e) { toast.error(String(e)); }
+    } catch (e) { toast.error(toUserMessage(e)); }
   };
+
+  // Last activity per folder (direct membership; UI review #3) — two cheap
+  // cached queries the explorer mostly has warm already.
+  const { data: allMeetings = [] } = useQuery({ queryKey: ["meetings"], queryFn: ipc.listMeetings, staleTime: 60_000 });
+  const { data: membershipMap = {} } = useQuery({
+    queryKey: ["folder-memberships"],
+    queryFn: () => ipc.getFolderMembershipsMap(),
+    staleTime: 60_000,
+  });
+  const lastActiveByFolder = useMemo(() => {
+    const newest = new Map<string, string>();
+    const dateOf = (m: { actual_start: string | null; created_at: string }) =>
+      m.actual_start ?? m.created_at;
+    for (const m of allMeetings) {
+      for (const fid of (membershipMap as Record<string, string[]>)[m.id] ?? []) {
+        const d = dateOf(m);
+        if (!newest.has(fid) || d > (newest.get(fid) as string)) newest.set(fid, d);
+      }
+    }
+    const out = new Map<string, string>();
+    for (const [fid, iso] of newest) {
+      out.set(fid, new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+    }
+    return out;
+  }, [allMeetings, membershipMap]);
 
   // Which folders to show as the grid — if no active folder, show top-level
   // If active folder, show its subfolders (handled in FolderMeetings)
@@ -294,7 +318,7 @@ export function FolderExplorer({ activeFolderId }: FolderExplorerProps) {
       {/* Toolbar */}
       <div className="px-4 py-2.5 border-b border-border shrink-0 flex items-center gap-2">
         {/* Breadcrumb */}
-        <div className="flex-1 flex items-center gap-1 text-[12px] min-w-0 flex-wrap">
+        <div className="flex-1 flex items-center gap-1 text-caption min-w-0 flex-wrap">
           <button
             type="button"
             onClick={() => navigateTo(null)}
@@ -323,7 +347,7 @@ export function FolderExplorer({ activeFolderId }: FolderExplorerProps) {
         <button
           type="button"
           onClick={handleNewRootFolder}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors shrink-0"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-caption text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors shrink-0"
           title="Create a new folder"
         >
           <Plus size={12} />
@@ -349,12 +373,13 @@ export function FolderExplorer({ activeFolderId }: FolderExplorerProps) {
                 </button>
               </div>
             ) : (
-              <div className="flex flex-wrap gap-2 content-start">
+              <div className="ios-group max-w-2xl">
                 {gridFolders.map(node => (
-                  <FolderCard
+                  <FolderRow
                     key={node.id}
                     node={node}
                     color={folderColorFromId(node.id, accentColor)}
+                    lastActive={lastActiveByFolder.get(node.id) ?? null}
                     onOpen={() => navigateTo(node.id)}
                   />
                 ))}

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { announce } from "../lib/announce";
 
 export interface Toast {
   id: string;
@@ -26,6 +27,12 @@ export const useToastStore = create<ToastStore>((set) => ({
     const id = `toast-${++nextId}`;
     const duration = toast.duration ?? 4000;
     set((s) => ({ toasts: [...s.toasts, { ...toast, id }] }));
+    // Screen-reader announcement rides the pre-mounted live region, not the
+    // toast DOM. Only problems interrupt; the rest waits politely.
+    announce(
+      toast.title ? `${toast.title}. ${toast.message}` : toast.message,
+      toast.type === "error" || toast.type === "warning" ? "assertive" : "polite",
+    );
     if (duration > 0) {
       setTimeout(() => {
         set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));

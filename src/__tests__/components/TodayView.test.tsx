@@ -156,9 +156,9 @@ describe("TodayView", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Start first recording/i }));
 
     await waitFor(() => {
-      expect(useToastStore.getState().toasts[0]?.message).toContain(
-        "Could not create a meeting: Error: database locked",
-      );
+      const t = useToastStore.getState().toasts[0];
+      expect(t?.title).toBe("Couldn't create the meeting");
+      expect(t?.message).toContain("database locked");
     });
     expect(navigateMock).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /Start first recording/i })).not.toBeDisabled();

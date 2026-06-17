@@ -4,6 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Meeting, ipc } from "../../lib/ipc";
+import { toUserMessage } from "../../lib/errors";
 import { AlertCircle, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Loader2, RefreshCw, Settings } from "lucide-react";
 import {
   format,
@@ -69,8 +70,9 @@ export function CalendarView() {
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
       queryClient.invalidateQueries({ queryKey: ["ics-urls"] });
     } catch (e) {
-      setSyncError(`Calendar sync failed: ${String(e)}`);
-      toast.error(`Calendar sync failed: ${String(e)}`);
+      const msg = toUserMessage(e, "Couldn't reach the calendar");
+      setSyncError(msg);
+      toast.error(msg, "Calendar sync failed");
     } finally {
       setIsSyncing(false);
     }
@@ -137,7 +139,7 @@ export function CalendarView() {
         <button
           type="button"
           onClick={() => setCurrentDate(new Date())}
-          className="px-2.5 py-1 rounded-md text-[11px] font-medium border border-border text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+          className="px-2.5 py-1 rounded-md text-caption font-medium border border-border text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
         >
           Today
         </button>
@@ -160,13 +162,15 @@ export function CalendarView() {
           <ChevronRight size={15} />
         </button>
 
-        <div className="flex-1" />
-
+        {/* Status reads as information, not a control (UI review #7) —
+            it sits with the date context, away from sync/view switches. */}
         <CalendarToolbarStatus
           hasCalendarConnection={hasCalendarConnection}
           isCheckingCalendarStatus={isCheckingCalendarStatus}
           statusError={calendarStatusError}
         />
+
+        <div className="flex-1" />
 
         {/* Sync button */}
         <button
@@ -238,7 +242,7 @@ function CalendarToolbarStatus({
 }) {
   if (isCheckingCalendarStatus) {
     return (
-      <span className="inline-flex min-h-7 items-center gap-1 rounded-full bg-bg-hover px-2 text-[11px] font-medium text-text-muted">
+      <span className="inline-flex min-h-7 items-center gap-1 rounded-full bg-bg-hover px-2 text-caption font-medium text-text-muted">
         <Loader2 size={11} className="animate-spin" />
         Checking
       </span>
@@ -246,7 +250,7 @@ function CalendarToolbarStatus({
   }
   if (statusError) {
     return (
-      <span className="inline-flex min-h-7 items-center gap-1 rounded-full bg-recording/10 px-2 text-[11px] font-medium text-recording">
+      <span className="inline-flex min-h-7 items-center gap-1 rounded-full bg-recording/10 px-2 text-caption font-medium text-recording">
         <AlertCircle size={11} />
         Status issue
       </span>
@@ -254,14 +258,14 @@ function CalendarToolbarStatus({
   }
   if (hasCalendarConnection) {
     return (
-      <span className="inline-flex min-h-7 items-center gap-1 rounded-full bg-accent/10 px-2 text-[11px] font-medium text-accent">
+      <span className="inline-flex min-h-7 items-center gap-1 rounded-full bg-accent/10 px-2 text-caption font-medium text-accent">
         <CheckCircle2 size={11} />
         Calendar connected
       </span>
     );
   }
   return (
-    <span className="inline-flex min-h-7 items-center gap-1 rounded-full bg-warning/10 px-2 text-[11px] font-medium text-warning">
+    <span className="inline-flex min-h-7 items-center gap-1 rounded-full bg-warning/10 px-2 text-caption font-medium text-warning">
       <AlertCircle size={11} />
       No calendar
     </span>
@@ -320,7 +324,7 @@ function CalendarEmptyState({
         <button
           type="button"
           onClick={onConnect}
-          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+          className="btn btn-secondary btn-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
         >
           <Settings size={14} />
           Open Calendar settings
@@ -330,10 +334,10 @@ function CalendarEmptyState({
           onClick={onSync}
           disabled={isSyncing || isCheckingCalendarStatus}
           aria-busy={isSyncing}
-          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:cursor-not-allowed disabled:opacity-50"
+          className="btn btn-primary btn-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
         >
           {isSyncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-          {isSyncing ? "Syncing calendar..." : "Check for calendar events"}
+          {isSyncing ? "Syncing calendar…" : "Check for calendar events"}
         </button>
       </div>
     </div>

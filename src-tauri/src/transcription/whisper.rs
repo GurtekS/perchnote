@@ -1,13 +1,15 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use tokio::process::Command;
-use tokio::sync::Semaphore;
-use tokio::task::JoinSet;
 
-static CHUNK_COUNTER: AtomicU64 = AtomicU64::new(0);
+// Pause-aligned chunking bounds (16kHz mono). A chunk is emitted at the
+// midpoint of the first ≥600ms quiet run after MIN_CUT, never before MIN
+// is buffered, and at the quietest 100ms window once MAX is reached.
+const MIN_CHUNK_SAMPLES: usize = 16_000 * 5;
+const MIN_CUT_SAMPLES: usize = 16_000 * 5 / 2;
+const MAX_CHUNK_SAMPLES: usize = 16_000 * 12;
+const PAUSE_WIN_SAMPLES: usize = 1_600; // 100ms
+const PAUSE_QUIET_RMS: f32 = 0.003;
+const PAUSE_RUN_WINS: usize = 6; // 600ms of consecutive quiet windows
 
 /// Word-level timestamp data 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +37,10 @@ pub struct TranscriptSegment {
     /// Confidence score (0.0-1.0) for speaker detection specifically
     #[serde(default)]
     pub speaker_confidence: f32,
+    /// Flagged live by the user (⌘D) or in the drawer — enhance prioritizes
+    /// these moments (plan v3 rank 6).
+    #[serde(default)]
+    pub highlighted: bool,
 }
 
 /// Configuration for whisper transcription
@@ -46,6 +52,8 @@ pub struct WhisperConfig {
     pub gpu_enabled: bool,
     /// Custom vocabulary terms to pass as initial prompt context 
     pub custom_vocabulary: Option<String>,
+    /// Persistent correction rules applied to raw ASR output (plan v10 #5).
+    pub correction_rules: Vec<crate::transcription::corrections::CorrectionRule>,
     /// Whether noise cancellation is enabled 
     pub noise_cancellation: bool,
     /// Configurable noise gate threshold 
@@ -237,35 +245,39 @@ impl AdaptiveSpeakerContext {
 
 pub struct WhisperSidecar;
 
+/// One chunk handed to the transcription worker. Speaker/confidence are
+/// computed upstream (cheap, order-dependent); the worker only runs whisper.
+struct ChunkJob {
+    samples: Vec<f32>,
+    start_ms: u64,
+    duration_ms: u64,
+    speaker: Option<String>,
+    confidence: f32,
+    spk_confidence: f32,
+    is_overlap: bool,
+}
+
+/// Last ~`n` chars of prior output, fed back as context for the next chunk.
+fn tail_chars(s: &str, n: usize) -> String {
+    let start = s.char_indices().rev().nth(n.saturating_sub(1)).map(|(i, _)| i).unwrap_or(0);
+    s[start..].to_string()
+}
+
 impl WhisperSidecar {
-    /// Start batch-mode transcription with VAD pre-processing ,
-    /// overlapping chunk windows , and adaptive chunk sizing .
+    /// Start live transcription on an in-process whisper engine (plan v2
+    /// rank 8): the model is already loaded in `engine`, chunks are
+    /// pause-aligned, and ONE worker transcribes strictly sequentially —
+    /// segments can never arrive out of order (the old 2-process sidecar
+    /// pool could finish out of order) and cross-chunk context carries via
+    /// the initial prompt.
     pub async fn start(
-        whisper_path: PathBuf,
-        model_path: PathBuf,
+        engine: crate::transcription::engine::WhisperEngine,
         mut audio_rx: tokio::sync::mpsc::Receiver<Vec<f32>>,
         segment_tx: tokio::sync::mpsc::Sender<TranscriptSegment>,
         config: WhisperConfig,
     ) -> Result<tokio::task::JoinHandle<()>> {
-        if !whisper_path.exists() {
-            return Err(anyhow!(
-                "whisper-cli not found at {:?}",
-                whisper_path
-            ));
-        }
-
-        if !model_path.exists() {
-            return Err(anyhow!(
-                "whisper model not found at {:?}",
-                model_path
-            ));
-        }
-
-        let temp_dir = std::env::temp_dir().join("perchnote-whisper");
-        std::fs::create_dir_all(&temp_dir)?;
-
         let handle = tokio::spawn(async move {
-            // Extract noise gate config for use in processing 
+            // Extract noise gate config for use in processing
             let noise_gate_threshold = if config.noise_cancellation {
                 config.noise_gate_threshold
             } else {
@@ -273,25 +285,111 @@ impl WhisperSidecar {
             };
 
             let mut accumulated: Vec<f32> = Vec::new();
-            // Base chunk size: 5 seconds
-            let base_chunk_samples = 16_000 * 5;
-            let base_chunk_duration_ms: u64 = 5_000;
             let mut elapsed_ms: u64 = 0;
             let mut speaker_counter: u32 = 1;
             let mut last_energy: f32 = 0.0;
-            // Track silence duration for adaptive chunk sizing 
-            let mut continuous_speech_samples: usize = 0;
-            // For paragraph detection: track silence gaps
-            let mut last_had_speech = false;
 
             // Adaptive speaker context
             let mut speaker_ctx = AdaptiveSpeakerContext::new();
 
-            // Allow up to 2 whisper processes in parallel
-            let semaphore = Arc::new(Semaphore::new(2));
-            let mut join_set: JoinSet<()> = JoinSet::new();
+            // Sequential transcription worker. State creation pays the
+            // one-time Metal shader compile, so it happens here at recording
+            // start — not on the first chunk.
+            let (work_tx, work_rx) = std::sync::mpsc::channel::<ChunkJob>();
+            let worker = {
+                let tx = segment_tx.clone();
+                let language = config.language.clone();
+                let vocab = config.custom_vocabulary.clone();
+                let rules = config.correction_rules.clone();
+                tokio::task::spawn_blocking(move || {
+                    let mut state = match engine.create_state() {
+                        Ok(s) => s,
+                        Err(e) => {
+                            log::error!("whisper: could not create state: {e}");
+                            return;
+                        }
+                    };
+                    // Silero gate (plan v4): drops confidently-silent chunks
+                    // before whisper ever sees them — the dominant
+                    // hallucination mitigation in the literature.
+                    let mut vad = engine.create_vad();
+                    // *.en models: skip meaningless auto language detection.
+                    let language: Option<String> = match language.as_deref() {
+                        Some("auto") | None if engine.english_only() => Some("en".into()),
+                        _ => language,
+                    };
+                    let mut prev_tail = String::new();
+                    while let Ok(job) = work_rx.recv() {
+                        if let Some(v) = vad.as_mut() {
+                            if !crate::transcription::engine::chunk_has_speech(v, &job.samples) {
+                                log::debug!("whisper: VAD gated chunk at {}ms", job.start_ms);
+                                continue;
+                            }
+                        }
+                        let prompt = match (vocab.as_deref(), prev_tail.is_empty()) {
+                            (Some(v), false) => Some(format!("{v}. {prev_tail}")),
+                            (Some(v), true) => Some(v.to_string()),
+                            (None, false) => Some(prev_tail.clone()),
+                            (None, true) => None,
+                        };
+                        match crate::transcription::engine::transcribe_chunk(
+                            &mut state,
+                            &job.samples,
+                            language.as_deref(),
+                            prompt.as_deref(),
+                        ) {
+                            Ok(Some(ct))
+                                if ct.no_speech_prob > 0.6 =>
+                            {
+                                // Whisper itself doubts there was speech.
+                                log::debug!(
+                                    "whisper: dropped low-confidence chunk at {}ms (no_speech {:.2})",
+                                    job.start_ms, ct.no_speech_prob
+                                );
+                            }
+                            Ok(Some(ct))
+                                if crate::transcription::engine::is_hallucination_text(&ct.text)
+                                    && ct.no_speech_prob > 0.3 =>
+                            {
+                                log::info!(
+                                    "whisper: dropped hallucination at {}ms: {:?}",
+                                    job.start_ms, ct.text
+                                );
+                            }
+                            Ok(Some(ct)) if !is_noise_text(&ct.text) => {
+                                let raw = ct.text;
+                                // Confidence-gated context carry: a doubtful
+                                // chunk must not seed the next one's prompt.
+                                if ct.no_speech_prob < 0.4 {
+                                    prev_tail = tail_chars(&raw, 200);
+                                } else {
+                                    prev_tail.clear();
+                                }
+                                let text = crate::transcription::corrections::apply_rules(
+                                    &post_process_text(&raw),
+                                    &rules,
+                                );
+                                log::info!("whisper [{}ms]: {} chars", job.start_ms, text.len());
+                                let _ = tx.blocking_send(TranscriptSegment {
+                                    text,
+                                    start_ms: job.start_ms,
+                                    end_ms: job.start_ms + job.duration_ms,
+                                    speaker: job.speaker,
+                                    confidence: Some(job.confidence),
+                                    words: None,
+                                    is_overlap: job.is_overlap,
+                                    speaker_confidence: job.spk_confidence,
+                                    highlighted: false,
+                                });
+                            }
+                            Ok(_) => log::debug!("whisper: no speech at {}ms", job.start_ms),
+                            Err(e) => log::warn!("whisper chunk at {}ms failed: {e}", job.start_ms),
+                        }
+                    }
+                })
+            };
 
-            log::info!("whisper: ready, batching every 5s with 1s overlap, VAD enabled, adaptive speaker model active");
+            log::info!("whisper: in-process engine ready, pause-aligned chunking (5s min, cut at 600ms quiet runs, 12s cap), VAD enabled, adaptive speaker model active");
 
             loop {
                 match audio_rx.recv().await {
@@ -301,88 +399,65 @@ impl WhisperSidecar {
                     None => {
                         log::info!("whisper: channel closed, {} samples remaining", accumulated.len());
                         if accumulated.len() >= 1_600 {
-                            // Apply noise gate 
+                            // Apply noise gate
                             let cleaned = apply_noise_gate(&accumulated, noise_gate_threshold);
                             let duration_ms = (cleaned.len() as u64 * 1000) / 16_000;
                             let (speaker, spk_confidence) = detect_speaker_change_adaptive(
                                 &cleaned, &mut last_energy, &mut speaker_counter,
                                 &mut speaker_ctx, elapsed_ms,
                             );
-                            // Confidence from RMS energy 
+                            // Confidence from RMS energy
                             let confidence = calculate_confidence(&cleaned);
                             // Check overlap with previous segment
                             let is_overlap = elapsed_ms < speaker_ctx.last_segment_end_ms;
-                            if let Some(text) = process_chunk(
-                                &whisper_path,
-                                &model_path,
-                                &temp_dir,
-                                &cleaned,
-                                config.language.as_deref(),
-                                config.gpu_enabled,
-                                config.custom_vocabulary.as_deref(),
-                            ).await {
-                                log::info!("whisper: final segment ({} chars)", text.len());
-                                speaker_ctx.last_segment_end_ms = elapsed_ms + duration_ms;
-                                let _ = segment_tx.send(TranscriptSegment {
-                                    text,
-                                    start_ms: elapsed_ms,
-                                    end_ms: elapsed_ms + duration_ms,
-                                    speaker,
-                                    confidence: Some(confidence),
-                                    words: None,
-                                    is_overlap,
-                                    speaker_confidence: spk_confidence,
-                                }).await;
-                            }
+                            speaker_ctx.last_segment_end_ms = elapsed_ms + duration_ms;
+                            let _ = work_tx.send(ChunkJob {
+                                samples: cleaned,
+                                start_ms: elapsed_ms,
+                                duration_ms,
+                                speaker,
+                                confidence,
+                                spk_confidence,
+                                is_overlap,
+                            });
                         }
-                        // Wait for all in-flight chunk tasks before cleaning up
-                        while join_set.join_next().await.is_some() {}
+                        // Close the job queue and wait for the worker to drain it.
+                        drop(work_tx);
+                        let _ = worker.await;
                         break;
                     }
                 }
 
-                // VAD pre-processing : Check if accumulated audio has speech
-                let current_rms = calculate_rms(&accumulated[accumulated.len().saturating_sub(1600)..]);
-                let has_speech = current_rms > 0.005;
-
-                if has_speech {
-                    continuous_speech_samples += 1600;
-                    last_had_speech = true;
-                } else if last_had_speech {
-                    // Silence after speech — potential paragraph break 
-                    last_had_speech = false;
-                }
-
-                // Adaptive chunk sizing : During continuous speech, use longer chunks
-                // for better context. During silence/pauses, process shorter chunks.
-                let target_chunk_samples = if continuous_speech_samples > 16_000 * 8 {
-                    // Very long continuous speech: use 8-second chunks
-                    16_000 * 8
+                // Pause-aligned chunking (plan v2 rank 6): never slice mid-word.
+                // Once enough audio is buffered, cut at the midpoint of a ≥600ms
+                // quiet run; if speech never pauses, fall back at 12s to the
+                // quietest 100ms window so the live transcript stays current
+                // (both bounds sit well under whisper's 30s context window).
+                let cut = if accumulated.len() < MIN_CHUNK_SAMPLES {
+                    None
+                } else if let Some(at) = find_pause_cut(&accumulated, MIN_CUT_SAMPLES) {
+                    Some(at)
+                } else if accumulated.len() >= MAX_CHUNK_SAMPLES {
+                    Some(quietest_cut(&accumulated, MIN_CHUNK_SAMPLES))
                 } else {
-                    base_chunk_samples
+                    None
                 };
 
-                if accumulated.len() >= target_chunk_samples {
-                    // VAD: Skip if entire chunk is silence 
-                    let chunk_rms = calculate_rms(&accumulated[..target_chunk_samples]);
+                if let Some(cut_at) = cut {
+                    // VAD: Skip if entire chunk is silence
+                    let chunk_rms = calculate_rms(&accumulated[..cut_at]);
                     if chunk_rms < 0.003 {
-                        accumulated.drain(..target_chunk_samples);
-                        elapsed_ms += (target_chunk_samples as u64) * 1000 / 16_000;
-                        continuous_speech_samples = 0;
+                        accumulated.drain(..cut_at);
+                        elapsed_ms += (cut_at as u64) * 1000 / 16_000;
                         continue;
                     }
 
-                    let chunk_audio = accumulated[..target_chunk_samples].to_vec();
-                    accumulated.drain(..target_chunk_samples);
+                    let chunk_audio = accumulated[..cut_at].to_vec();
+                    accumulated.drain(..cut_at);
 
                     let current_ms = elapsed_ms;
-                    let chunk_duration_ms = if target_chunk_samples > base_chunk_samples {
-                        (target_chunk_samples as u64 * 1000) / 16_000
-                    } else {
-                        base_chunk_duration_ms
-                    };
-                    elapsed_ms += (target_chunk_samples as u64 * 1000) / 16_000;
-                    continuous_speech_samples = 0;
+                    let chunk_duration_ms = (cut_at as u64 * 1000) / 16_000;
+                    elapsed_ms += chunk_duration_ms;
 
                     // Apply noise gate 
                     let cleaned = apply_noise_gate(&chunk_audio, noise_gate_threshold);
@@ -400,54 +475,24 @@ impl WhisperSidecar {
                     let is_overlap = current_ms < speaker_ctx.last_segment_end_ms;
                     speaker_ctx.last_segment_end_ms = current_ms + chunk_duration_ms;
 
-                    let wp = whisper_path.clone();
-                    let mp = model_path.clone();
-                    let td = temp_dir.clone();
-                    let tx = segment_tx.clone();
-                    let sem = semaphore.clone();
-                    let lang = config.language.clone();
-                    let gpu = config.gpu_enabled;
-                    let vocab = config.custom_vocabulary.clone();
-
-                    join_set.spawn(async move {
-                        let _permit = sem.acquire().await;
-                        match process_chunk(
-                            &wp, &mp, &td, &cleaned,
-                            lang.as_deref(),
-                            gpu,
-                            vocab.as_deref(),
-                        ).await {
-                            Some(text) => {
-                                log::info!("whisper [{}ms]: {} chars", current_ms, text.len());
-                                let _ = tx.send(TranscriptSegment {
-                                    text,
-                                    start_ms: current_ms,
-                                    end_ms: current_ms + chunk_duration_ms,
-                                    speaker,
-                                    confidence: Some(confidence),
-                                    words: None,
-                                    is_overlap,
-                                    speaker_confidence: spk_confidence,
-                                }).await;
-                            }
-                            None => {
-                                log::debug!("whisper: no speech at {}ms", current_ms);
-                            }
-                        }
+                    let _ = work_tx.send(ChunkJob {
+                        samples: cleaned,
+                        start_ms: current_ms,
+                        duration_ms: chunk_duration_ms,
+                        speaker,
+                        confidence,
+                        spk_confidence,
+                        is_overlap,
                     });
-                    // Reap any finished tasks to prevent unbounded growth
-                    while join_set.try_join_next().is_some() {}
                 }
             }
 
-            // Log speaker separation quality at end of recording 
+            // Log speaker separation quality at end of recording
             let quality = speaker_ctx.compute_quality();
             log::info!(
                 "whisper: speaker separation quality: score={:.2}, variance={:.6}, switches={}, consistency={:.1}",
                 quality.quality_score, quality.energy_variance, quality.switch_count, quality.switch_consistency
             );
-
-            let _ = tokio::fs::remove_dir_all(&temp_dir).await;
         });
 
         Ok(handle)
@@ -460,6 +505,46 @@ fn calculate_rms(samples: &[f32]) -> f32 {
         return 0.0;
     }
     (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt()
+}
+
+/// First cut point at the midpoint of a ≥600ms quiet run starting at or
+/// after `from` — a natural sentence/turn boundary, so whisper never sees
+/// half a word. Returns None when speech is continuous.
+fn find_pause_cut(samples: &[f32], from: usize) -> Option<usize> {
+    let mut run_start: Option<usize> = None;
+    let mut start = from;
+    while start + PAUSE_WIN_SAMPLES <= samples.len() {
+        let quiet = calculate_rms(&samples[start..start + PAUSE_WIN_SAMPLES]) < PAUSE_QUIET_RMS;
+        match (quiet, run_start) {
+            (true, None) => run_start = Some(start),
+            (true, Some(rs)) => {
+                let run_len = start + PAUSE_WIN_SAMPLES - rs;
+                if run_len >= PAUSE_RUN_WINS * PAUSE_WIN_SAMPLES {
+                    return Some(rs + run_len / 2);
+                }
+            }
+            (false, _) => run_start = None,
+        }
+        start += PAUSE_WIN_SAMPLES;
+    }
+    None
+}
+
+/// Midpoint of the lowest-energy 100ms window at or after `from` — the
+/// least-bad cut when a speaker never pauses for a full 600ms.
+fn quietest_cut(samples: &[f32], from: usize) -> usize {
+    let mut best_start = from.min(samples.len().saturating_sub(PAUSE_WIN_SAMPLES));
+    let mut best_rms = f32::MAX;
+    let mut start = best_start;
+    while start + PAUSE_WIN_SAMPLES <= samples.len() {
+        let rms = calculate_rms(&samples[start..start + PAUSE_WIN_SAMPLES]);
+        if rms < best_rms {
+            best_rms = rms;
+            best_start = start;
+        }
+        start += PAUSE_WIN_SAMPLES;
+    }
+    (best_start + PAUSE_WIN_SAMPLES / 2).min(samples.len())
 }
 
 /// Configurable noise gate : attenuate samples below noise floor.
@@ -606,105 +691,7 @@ fn calculate_confidence(samples: &[f32]) -> f32 {
 }
 
 
-/// Write audio samples to a temporary WAV file and run whisper-cli on it.
-/// Returns the transcribed text, or None if transcription produced no useful output.
-///
-/// Accepts optional language , GPU flag , and custom vocabulary .
-async fn process_chunk(
-    whisper_path: &Path,
-    model_path: &Path,
-    temp_dir: &Path,
-    samples: &[f32],
-    language: Option<&str>,
-    gpu_enabled: bool,
-    custom_vocabulary: Option<&str>,
-) -> Option<String> {
-    // Skip chunks that are mostly silence
-    let rms = calculate_rms(samples);
-    if rms < 0.003 {
-        return None;
-    }
-
-    let chunk_id = CHUNK_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let wav_path = temp_dir.join(format!("chunk_{}.wav", chunk_id));
-
-    // Write 16kHz mono WAV
-    let spec = hound::WavSpec {
-        channels: 1,
-        sample_rate: 16_000,
-        bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
-    };
-
-    {
-        let mut writer = hound::WavWriter::create(&wav_path, spec).ok()?;
-        for &sample in samples {
-            let s16 = (sample * i16::MAX as f32).clamp(i16::MIN as f32, i16::MAX as f32) as i16;
-            writer.write_sample(s16).ok()?;
-        }
-        writer.finalize().ok()?;
-    }
-
-    let mut cmd = Command::new(whisper_path);
-    cmd.arg("--model").arg(model_path);
-
-    // Language selection : use specified language, or "auto" for auto-detection
-    let lang = language.unwrap_or("auto");
-    cmd.arg("--language").arg(lang);
-
-    cmd.arg("--no-prints")
-        .arg("--no-timestamps")
-        .arg("--threads")
-        .arg("4")
-        .arg("--flash-attn")
-        .arg("--suppress-nst");
-
-    // Word-level timestamps : request word-level output
-    cmd.arg("--output-words");
-
-    // GPU / Metal acceleration on macOS 
-    if gpu_enabled {
-        cmd.arg("--gpu");
-    }
-
-    // Custom vocabulary hints via initial prompt 
-    if let Some(vocab) = custom_vocabulary {
-        if !vocab.trim().is_empty() {
-            cmd.arg("--prompt").arg(vocab);
-        }
-    }
-
-    // Model caching note : whisper-cli spawns per-chunk. For true model
-    // caching, use `--keep-context` if supported by whisper.cpp build, or migrate
-    // to a long-running whisper-server process. Currently each invocation reloads
-    // the model, which is the main latency bottleneck.
-
-    cmd.arg("--file").arg(&wav_path);
-
-    let output = cmd.output().await.ok()?;
-
-    let _ = std::fs::remove_file(&wav_path);
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        log::warn!("whisper-cli failed: {}", stderr);
-        return None;
-    }
-
-    let text = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_string();
-
-    // Filter out noise/hallucination markers
-    if is_noise_text(&text) {
-        None
-    } else {
-        // Apply post-processing: capitalize, punctuation , and spell-check 
-        Some(post_process_text(&text))
-    }
-}
-
-/// Post-process transcribed text: punctuation restoration and spell-check 
+/// Post-process transcribed text: punctuation restoration and spell-check
 fn post_process_text(text: &str) -> String {
     // Apply spell-check corrections first 
     let mut result = apply_spell_check(text);
@@ -857,4 +844,60 @@ fn is_noise_text(text: &str) -> bool {
         return true;
     }
     false
+}
+
+#[cfg(test)]
+mod chunking_tests {
+    use super::*;
+
+    /// 16kHz test signal: `spans` of (seconds, amplitude). 0.0 amp = silence.
+    fn signal(spans: &[(f32, f32)]) -> Vec<f32> {
+        let mut out = Vec::new();
+        for &(secs, amp) in spans {
+            let n = (secs * 16_000.0) as usize;
+            for i in 0..n {
+                out.push((i as f32 * 0.3).sin() * amp);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn pause_cut_lands_inside_the_silence_gap() {
+        // 3s speech, 0.8s silence, 3s speech — the cut must fall in the gap.
+        let s = signal(&[(3.0, 0.5), (0.8, 0.0), (3.0, 0.5)]);
+        let cut = find_pause_cut(&s, MIN_CUT_SAMPLES).expect("gap should be found");
+        assert!(cut > 3 * 16_000 && cut < (3.8 * 16_000.0) as usize, "cut at {cut}");
+    }
+
+    #[test]
+    fn continuous_speech_has_no_pause_cut() {
+        let s = signal(&[(8.0, 0.5)]);
+        assert_eq!(find_pause_cut(&s, MIN_CUT_SAMPLES), None);
+    }
+
+    #[test]
+    fn pauses_before_the_minimum_cut_are_ignored() {
+        // Gap at 1s is before the 2.5s minimum; everything after is continuous.
+        let s = signal(&[(1.0, 0.5), (0.8, 0.0), (6.0, 0.5)]);
+        assert_eq!(find_pause_cut(&s, MIN_CUT_SAMPLES), None);
+    }
+
+    #[test]
+    fn short_dips_do_not_count_as_pauses() {
+        // 300ms of quiet is a breath, not a boundary.
+        let s = signal(&[(4.0, 0.5), (0.3, 0.0), (4.0, 0.5)]);
+        assert_eq!(find_pause_cut(&s, MIN_CUT_SAMPLES), None);
+    }
+
+    #[test]
+    fn quietest_cut_picks_the_energy_dip() {
+        // Loud throughout except a soft 100ms at 7s.
+        let s = signal(&[(7.0, 0.5), (0.1, 0.01), (4.0, 0.5)]);
+        let cut = quietest_cut(&s, MIN_CHUNK_SAMPLES);
+        assert!(
+            cut >= 7 * 16_000 && cut <= (7.1 * 16_000.0) as usize + PAUSE_WIN_SAMPLES,
+            "cut at {cut}"
+        );
+    }
 }

@@ -1,5 +1,7 @@
 pub mod audio;
+pub mod autotitle;
 pub mod calendar;
+pub mod deeplinks;
 pub mod meetings;
 pub mod notes;
 pub mod chat;
@@ -9,3 +11,5 @@ pub mod tags;
 pub mod settings;
 pub mod search;
 pub mod voice;
+pub mod import;
+pub mod insights;

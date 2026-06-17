@@ -34,6 +34,9 @@ struct GenActionItem: Codable {
 
     @Guide(description: "Mentioned deadline, or null if not stated")
     let deadline: String?
+
+    @Guide(description: "Start of the transcript line this item came from, in milliseconds: convert its [m:ss] stamp as (m*60+ss)*1000. Null if unsure.")
+    let source_start_ms: Int?
 }
 
 @available(macOS 26.0, *)

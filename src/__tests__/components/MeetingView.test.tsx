@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MeetingView } from "../../components/meeting/MeetingView";
+import { useUIStore } from "../../stores/uiStore";
 import type { Meeting, Note } from "../../lib/ipc";
 
 const { ipcMock, mockNavigate } = vi.hoisted(() => ({
@@ -15,6 +16,7 @@ const { ipcMock, mockNavigate } = vi.hoisted(() => ({
     updateNoteGeneratedContent: vi.fn(),
     updateNoteRawContent: vi.fn(),
     createNote: vi.fn(),
+    getOrCreateNote: vi.fn(),
   },
 }));
 
@@ -52,16 +54,19 @@ vi.mock("../../components/meeting/NotesSurface", () => ({
   NotesSurface: ({
     isEnhanced,
     notesDisplayMode,
+    enhancedContent,
     onUpdate,
     onOriginalUpdate,
   }: {
     isEnhanced: boolean;
     notesDisplayMode: "ai" | "original";
+    enhancedContent?: string;
     onUpdate: (json: string) => void;
     onOriginalUpdate: (json: string) => void;
   }) => (
     <section>
       <p>{isEnhanced && notesDisplayMode === "ai" ? "AI notes active" : "Manual notes active"}</p>
+      <pre data-testid="enhanced-content">{enhancedContent ?? ""}</pre>
       <button type="button" onClick={() => onUpdate("{\"type\":\"doc\"}")}>Save note</button>
       <button type="button" onClick={() => onOriginalUpdate("{\"type\":\"doc\"}")}>Save original note</button>
     </section>
@@ -131,16 +136,18 @@ function renderMeetingView() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
+  const utils = render(
     <QueryClientProvider client={queryClient}>
       <MeetingView meetingId="m1" />
     </QueryClientProvider>,
   );
+  return { ...utils, queryClient };
 }
 
 describe("MeetingView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useUIStore.getState().clearPendingSeek();
     ipcMock.getMeeting.mockResolvedValue(makeMeeting());
     ipcMock.getNoteByMeeting.mockResolvedValue(makeNote());
     ipcMock.getTranscriptByMeeting.mockResolvedValue(null);
@@ -149,6 +156,7 @@ describe("MeetingView", () => {
     ipcMock.updateNoteGeneratedContent.mockResolvedValue(undefined);
     ipcMock.updateNoteRawContent.mockResolvedValue(undefined);
     ipcMock.createNote.mockResolvedValue(makeNote({ id: "note-created" }));
+    ipcMock.getOrCreateNote.mockResolvedValue(makeNote({ id: "note-created" }));
   });
 
   it("shows a loading state while the meeting query is unresolved", () => {
@@ -187,6 +195,50 @@ describe("MeetingView", () => {
     expect(await screen.findByText("Design Review")).toBeInTheDocument();
   });
 
+  it("consumes a pending seek parked for this meeting: opens the drawer, seeks, clears the slot", async () => {
+    const seeks: number[] = [];
+    const onSeek = (e: Event) => seeks.push((e as CustomEvent<{ ms: number }>).detail.ms);
+    window.addEventListener("seek-audio", onSeek);
+    try {
+      useUIStore.getState().setPendingSeek("m1", 754_000);
+
+      renderMeetingView();
+
+      expect(await screen.findByText("Transcript drawer")).toBeInTheDocument();
+      // Consumed on mount…
+      expect(useUIStore.getState().pendingSeek).toBeNull();
+      // …and the buffered dispatch follows once the drawer can hear it.
+      await waitFor(() => expect(seeks).toEqual([754_000]));
+    } finally {
+      window.removeEventListener("seek-audio", onSeek);
+    }
+  });
+
+  it("ignores a pending seek parked for a different meeting (audit P3-A)", async () => {
+    // A seek whose navigation never landed (deleted meeting, failed route)
+    // must not pop the drawer or replay in the next meeting opened. The
+    // stale entry stays parked — single-slot semantics mean only its own
+    // meeting consumes it or the next setPendingSeek overwrites it.
+    const seeks: number[] = [];
+    const onSeek = (e: Event) => seeks.push((e as CustomEvent<{ ms: number }>).detail.ms);
+    window.addEventListener("seek-audio", onSeek);
+    try {
+      useUIStore.getState().setPendingSeek("m-deleted", 99_000);
+
+      renderMeetingView();
+
+      expect(await screen.findByText("Design Review")).toBeInTheDocument();
+      // Outlive the 250ms dispatch window the consume path would have used.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(seeks).toEqual([]);
+      expect(screen.queryByText("Transcript drawer")).not.toBeInTheDocument();
+      expect(useUIStore.getState().pendingSeek).toEqual({ meetingId: "m-deleted", ms: 99_000 });
+    } finally {
+      window.removeEventListener("seek-audio", onSeek);
+      useUIStore.getState().clearPendingSeek();
+    }
+  });
+
   it("opens the transcript drawer from the existing document event", async () => {
     renderMeetingView();
 
@@ -214,6 +266,31 @@ describe("MeetingView", () => {
     expect(ipcMock.updateNoteRawContent).not.toHaveBeenCalledWith("note-1", "{\"type\":\"doc\"}");
   });
 
+  it("picks up external generated_content changes after a note refetch", async () => {
+    // e.g. the tasks view toggles an action item: it writes the note in the
+    // backend and invalidates ["note", meetingId]; the refetched body must
+    // reach the editor, not just the first cached snapshot.
+    const unchecked = JSON.stringify({
+      type: "doc",
+      content: [{ type: "actionItem", attrs: { task: "Ship it", done: false } }],
+    });
+    const checked = unchecked.replace("\"done\":false", "\"done\":true");
+    ipcMock.getNoteByMeeting
+      .mockResolvedValueOnce(makeNote({ generated_content: unchecked }))
+      .mockResolvedValue(makeNote({ generated_content: checked }));
+
+    const { queryClient } = renderMeetingView();
+
+    expect(await screen.findByText("AI notes active")).toBeInTheDocument();
+    expect(screen.getByTestId("enhanced-content").textContent).toContain("\"done\":false");
+
+    queryClient.invalidateQueries({ queryKey: ["note", "m1"] });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("enhanced-content").textContent).toContain("\"done\":true");
+    });
+  });
+
   it("keeps original-note edits routed to raw_content", async () => {
     renderMeetingView();
 
@@ -234,7 +311,9 @@ describe("MeetingView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save note" }));
 
     await waitFor(() => {
-      expect(ipcMock.createNote).toHaveBeenCalledWith("m1");
+      // Atomic get-or-create (not a bare create) so concurrent saves can't
+      // spawn duplicate note rows.
+      expect(ipcMock.getOrCreateNote).toHaveBeenCalledWith("m1");
       expect(ipcMock.updateNoteRawContent).toHaveBeenCalledWith("note-created", "{\"type\":\"doc\"}");
     });
   });

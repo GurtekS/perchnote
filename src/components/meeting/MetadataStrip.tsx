@@ -73,11 +73,20 @@ export function MetadataStrip({ meeting, onSaved }: Props) {
   }
 
   const dateStr = meeting.scheduled_start || meeting.actual_start || meeting.created_at;
-  const endStr = meeting.scheduled_end || meeting.actual_end;
+  // Duration pairs like with like (whole-app review P3): scheduled_start +
+  // actual_end produced "5h 35m" for a calendar event recorded later.
+  const durationPair: [string, string] | null =
+    meeting.actual_start && meeting.actual_end
+      ? [meeting.actual_start, meeting.actual_end]
+      : meeting.scheduled_start && meeting.scheduled_end
+      ? [meeting.scheduled_start, meeting.scheduled_end]
+      : null;
   const date = dateStr ? format(new Date(dateStr), "EEE, MMM d, yyyy 'at' h:mm a") : null;
   let duration: string | null = null;
-  if (dateStr && endStr) {
-    const mins = Math.round((new Date(endStr).getTime() - new Date(dateStr).getTime()) / 60000);
+  if (durationPair) {
+    const mins = Math.round(
+      (new Date(durationPair[1]).getTime() - new Date(durationPair[0]).getTime()) / 60000,
+    );
     if (mins > 0) duration = mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h${mins % 60 > 0 ? ` ${mins % 60}m` : ""}`;
   }
   const attendees = parseAttendeeNames(meeting.attendees);
@@ -87,30 +96,30 @@ export function MetadataStrip({ meeting, onSaved }: Props) {
 
   if (editing) {
     return (
-      <div className="mb-5 space-y-3 rounded-lg border border-border/70 bg-bg-secondary/45 p-3">
+      <div className="mb-5 space-y-3 card p-3">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">Start</span>
+            <span className="text-footnote font-medium text-text-muted uppercase tracking-wider">Start</span>
             <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)}
-              className="h-8 rounded-md border border-border bg-bg-secondary px-2 text-[12px] text-text-primary focus:outline-none focus:border-accent" />
+              className="h-8 rounded-md border border-border bg-bg-secondary px-2 text-caption text-text-primary focus:outline-none focus:border-accent" />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">End</span>
+            <span className="text-footnote font-medium text-text-muted uppercase tracking-wider">End</span>
             <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)}
-              className="h-8 rounded-md border border-border bg-bg-secondary px-2 text-[12px] text-text-primary focus:outline-none focus:border-accent" />
+              className="h-8 rounded-md border border-border bg-bg-secondary px-2 text-caption text-text-primary focus:outline-none focus:border-accent" />
           </label>
         </div>
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">Location / URL</span>
+          <span className="text-footnote font-medium text-text-muted uppercase tracking-wider">Location / URL</span>
           <input type="text" value={location} onChange={(e) => setLocation(e.target.value)}
             placeholder="Address or meeting URL"
-            className="h-8 rounded-md border border-border bg-bg-secondary px-2 text-[12px] text-text-primary placeholder-text-muted/50 focus:outline-none focus:border-accent" />
+            className="h-8 rounded-md border border-border bg-bg-secondary px-2 text-caption text-text-primary placeholder-text-muted/50 focus:outline-none focus:border-accent" />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">Attendees (comma-separated)</span>
+          <span className="text-footnote font-medium text-text-muted uppercase tracking-wider">Attendees (comma-separated)</span>
           <input type="text" value={attendeesRaw} onChange={(e) => setAttendeesRaw(e.target.value)}
             placeholder="Alice, Bob, Carol"
-            className="h-8 rounded-md border border-border bg-bg-secondary px-2 text-[12px] text-text-primary placeholder-text-muted/50 focus:outline-none focus:border-accent" />
+            className="h-8 rounded-md border border-border bg-bg-secondary px-2 text-caption text-text-primary placeholder-text-muted/50 focus:outline-none focus:border-accent" />
         </label>
         <div className="flex items-center gap-2 pt-1">
           <button type="button" onClick={save} disabled={saving}
@@ -126,13 +135,16 @@ export function MetadataStrip({ meeting, onSaved }: Props) {
     );
   }
 
+  // Display mode is ONE quiet line, not a card (UI review #1: the meeting
+  // view stacked five chrome layers and repeated the date three times
+  // before any notes). Edit mode keeps its full card below.
   return (
     <section
-      className="mb-5 rounded-lg border border-border/70 bg-bg-secondary/45 px-3 py-2.5 text-[12px] text-text-muted focus-within:border-accent/40"
+      className="mb-1.5 flex items-center gap-3 px-1 text-caption text-text-muted"
       aria-label="Meeting details"
     >
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div className="grid min-w-0 flex-1 grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-center">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1">
+        <div className="contents">
           <MetadataItem icon={<CalendarDays size={13} />} label="Date">
             <span className={date ? "" : "italic"}>{date || "No date set"}</span>
           </MetadataItem>
@@ -160,16 +172,16 @@ export function MetadataStrip({ meeting, onSaved }: Props) {
             </MetadataItem>
           )}
         </div>
-        <button
-          type="button"
-          onClick={openEdit}
-          className="flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
-          title="Edit meeting details"
-          aria-label="Edit meeting details"
-        >
-          <Pencil size={10} /> Edit details
-        </button>
       </div>
+      <button
+        type="button"
+        onClick={openEdit}
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
+        title="Edit meeting details"
+        aria-label="Edit meeting details"
+      >
+        <Pencil size={11} />
+      </button>
     </section>
   );
 }

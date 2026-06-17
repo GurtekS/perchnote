@@ -1,11 +1,14 @@
 import { useEditor, EditorContent, Editor } from "@tiptap/react";
-import { useEffect, useRef, useCallback, useImperativeHandle, forwardRef, useState } from "react";
+import { useEffect, useMemo, useRef, useCallback, useImperativeHandle, forwardRef, useState } from "react";
 import {
   Bold, Italic, Underline as UnderlineIcon, Strikethrough,
   List, ListOrdered, CheckSquare, Heading1, Heading2,
   Code, Highlighter, Quote,
 } from "lucide-react";
-import { editorExtensions } from "../../lib/tiptap/extensions";
+import { buildEditorExtensions, DEFAULT_PLACEHOLDER } from "../../lib/tiptap/extensions";
+import { sanitizeTiptapDoc } from "../../lib/tiptap/sanitizeTiptapDoc";
+import { handleImagePaste } from "../../lib/tiptap/pastedImage";
+import { toast } from "../../stores/toastStore";
 
 interface NoteEditorProps {
   content?: string;
@@ -16,6 +19,9 @@ interface NoteEditorProps {
   notepadMode?: boolean;
   /** Show formatting toolbar (default: true when notepadMode) */
   showToolbar?: boolean;
+  /** When set, ⌘V of a screenshot is saved as this meeting's attachment and
+   *  inserted inline (plan v9 #13). Absent → image pastes are ignored. */
+  meetingId?: string;
 }
 
 export interface NoteEditorHandle {
@@ -26,7 +32,7 @@ export interface NoteEditorHandle {
 function parseContent(content: string | undefined) {
   if (!content) return undefined;
   try {
-    return JSON.parse(content);
+    return sanitizeTiptapDoc(JSON.parse(content));
   } catch {
     return undefined;
   }
@@ -53,7 +59,8 @@ function ToolbarButton({
       }}
       title={title}
       aria-label={title}
-      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60 ${
+      aria-pressed={active}
+      className={`flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60 ${
         active
           ? "bg-accent/15 text-accent"
           : "text-text-muted hover:text-text-primary hover:bg-bg-hover"
@@ -65,7 +72,7 @@ function ToolbarButton({
 }
 
 function Separator() {
-  return <div className="w-px h-4 bg-border mx-0.5 shrink-0" />;
+  return <div className="mx-1 h-3.5 w-px shrink-0 bg-border-subtle" />;
 }
 
 function FormattingToolbar({ editor }: { editor: Editor | null }) {
@@ -85,7 +92,18 @@ function FormattingToolbar({ editor }: { editor: Editor | null }) {
   if (!editor) return null;
 
   return (
-    <div className="flex items-center flex-wrap gap-0.5 px-2 py-1.5 border-b border-border bg-bg-secondary shrink-0">
+    <div
+      role="toolbar"
+      aria-label="Formatting"
+      className="sticky top-0 z-10 flex w-fit flex-wrap items-center gap-0.5 rounded-lg px-0 py-1 shrink-0"
+      style={{
+        // A whisper of the notepad surface so the strip stays readable
+        // when notes scroll beneath it, without drawing a boxed bar.
+        background: "color-mix(in srgb, var(--notepad-bg) 88%, transparent)",
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
+      }}
+    >
       {/* Text style */}
       <ToolbarButton
         onClick={() => editor.chain().focus().toggleBold().run()}
@@ -136,14 +154,14 @@ function FormattingToolbar({ editor }: { editor: Editor | null }) {
       <ToolbarButton
         onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
         active={editor.isActive("heading", { level: 1 })}
-        title="Heading 1"
+        title="Heading 1 — type # then space"
       >
         <Heading1 size={13} />
       </ToolbarButton>
       <ToolbarButton
         onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
         active={editor.isActive("heading", { level: 2 })}
-        title="Heading 2"
+        title="Heading 2 — type ## then space"
       >
         <Heading2 size={13} />
       </ToolbarButton>
@@ -154,28 +172,28 @@ function FormattingToolbar({ editor }: { editor: Editor | null }) {
       <ToolbarButton
         onClick={() => editor.chain().focus().toggleBulletList().run()}
         active={editor.isActive("bulletList")}
-        title="Bullet list"
+        title="Bullet list — type - then space"
       >
         <List size={13} />
       </ToolbarButton>
       <ToolbarButton
         onClick={() => editor.chain().focus().toggleOrderedList().run()}
         active={editor.isActive("orderedList")}
-        title="Numbered list"
+        title="Numbered list — type 1. then space"
       >
         <ListOrdered size={13} />
       </ToolbarButton>
       <ToolbarButton
         onClick={() => editor.chain().focus().toggleTaskList().run()}
         active={editor.isActive("taskList")}
-        title="Task list"
+        title="Task list — type [] then space · ⌘⏎ toggles done"
       >
         <CheckSquare size={13} />
       </ToolbarButton>
       <ToolbarButton
         onClick={() => editor.chain().focus().toggleBlockquote().run()}
         active={editor.isActive("blockquote")}
-        title="Blockquote"
+        title="Blockquote — type > then space"
       >
         <Quote size={13} />
       </ToolbarButton>
@@ -191,9 +209,10 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(
       content,
       onUpdate,
       editable = true,
-      placeholder: _placeholder,
+      placeholder,
       notepadMode = false,
       showToolbar,
+      meetingId,
     },
     ref
   ) {
@@ -206,23 +225,58 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(
     // from overwriting the user's raw_content in the database
     const suppressUpdatesRef = useRef(false);
 
+    // Latest content scheduled for save but not yet delivered — flushed on
+    // unmount so navigating away never drops the last ≤500ms of typing.
+    const pendingSaveRef = useRef<string | null>(null);
+
     const debouncedUpdate = useCallback((json: string) => {
       if (suppressUpdatesRef.current) return;
+      pendingSaveRef.current = json;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
+        pendingSaveRef.current = null;
         onUpdateRef.current?.(json);
       }, 500);
     }, []);
 
+    // The Placeholder extension reads through this ref on every paint, so
+    // the copy can change live (recording swaps in the capture contract)
+    // without rebuilding the editor. (The prop was silently unused before —
+    // research round 5, capture item 2.)
+    const placeholderRef = useRef(placeholder ?? DEFAULT_PLACEHOLDER);
+    placeholderRef.current = placeholder ?? DEFAULT_PLACEHOLDER;
+    const extensions = useMemo(
+      () => buildEditorExtensions({ placeholder: () => placeholderRef.current }),
+      [],
+    );
+
+    // editorProps are captured when TipTap initialises — read through a ref
+    // so the paste handler always sees the current meeting (same pattern as
+    // placeholderRef above).
+    const meetingIdRef = useRef(meetingId);
+    meetingIdRef.current = meetingId;
+
     const editor = useEditor({
-      extensions: editorExtensions,
+      extensions,
       content: parseContent(content),
       editable,
       editorProps: {
+        // ⌘V of a screenshot → saved attachment + inline image (plan v9
+        // #13). Returns false for anything that isn't a PNG file, so
+        // ordinary text/HTML pastes take TipTap's default path untouched.
+        handlePaste: (view, event) =>
+          handleImagePaste(view, event, meetingIdRef.current, {
+            onError: (message) => toast.error(message),
+          }),
         attributes: {
           class: notepadMode
             ? "prose prose-invert prose-sm max-w-none min-h-[calc(100vh-200px)] focus:outline-none"
             : "prose prose-invert prose-sm max-w-none min-h-[300px] focus:outline-none px-4 py-3",
+          // VoiceOver reads the contenteditable itself, not the wrapper —
+          // the attrs must live here (plan v6 a11y).
+          role: "textbox",
+          "aria-multiline": "true",
+          "aria-label": "Meeting notes",
         },
       },
       onUpdate: ({ editor }) => {
@@ -247,6 +301,13 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(
         }
       },
     }), [editor]);
+
+    // An empty doc repaints its placeholder only on the next transaction;
+    // nudge one when the copy changes so recording start/stop swaps it
+    // immediately.
+    useEffect(() => {
+      if (editor) editor.view.dispatch(editor.state.tr);
+    }, [editor, placeholder]);
 
     // Apply any content that arrived before TipTap was ready
     useEffect(() => {
@@ -275,6 +336,10 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(
     useEffect(() => {
       return () => {
         if (debounceRef.current) clearTimeout(debounceRef.current);
+        if (pendingSaveRef.current !== null) {
+          onUpdateRef.current?.(pendingSaveRef.current);
+          pendingSaveRef.current = null;
+        }
       };
     }, []);
 

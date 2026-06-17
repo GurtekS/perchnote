@@ -1,4 +1,10 @@
 import { useState, useRef, useEffect } from "react";
+import {
+  applyEditorFontSize,
+  EDITOR_FONT_SIZE_KEY,
+  EDITOR_FONT_SIZES,
+} from "../../lib/editorFontSize";
+import { getVersion } from "@tauri-apps/api/app";
 import { ConfirmDialog } from "../shared/ConfirmDialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -6,10 +12,13 @@ import {
   Moon,
   Monitor,
   RotateCcw,
+  Loader2,
 } from "lucide-react";
 import { useThemeStore } from "../../stores/themeStore";
 import { ipc } from "../../lib/ipc";
 import { toast } from "../../stores/toastStore";
+import { toUserMessage } from "../../lib/errors";
+import { secondarySettingsButtonCompactClass, settingsInputClass } from "./settingsUi";
 
 const ACCENT_PRESETS = [
   { name: "Forest", hex: "#5a9c6a" },
@@ -32,20 +41,12 @@ export function GeneralSettings() {
   const [customHex, setCustomHex] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showResetDialog, setShowResetDialog] = useState(false);
-  const contextDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { data: savedUserContext = "" } = useQuery({
-    queryKey: ["setting", "user_context"],
-    queryFn: () => ipc.getSetting("user_context").then((v) => v ?? ""),
+  const { data: appVersion = "" } = useQuery({
+    queryKey: ["app-version"],
+    queryFn: getVersion,
+    staleTime: Infinity,
   });
-
-  const handleUserContextChange = (value: string) => {
-    if (contextDebounceRef.current) clearTimeout(contextDebounceRef.current);
-    contextDebounceRef.current = setTimeout(async () => {
-      await ipc.setSetting("user_context", value);
-      queryClient.invalidateQueries({ queryKey: ["setting", "user_context"] });
-    }, 600);
-  };
 
   // Sync customHex input when accent changes externally
   useEffect(() => {
@@ -61,29 +62,42 @@ export function GeneralSettings() {
     }
   };
 
-  // Templates query for default template picker
-  const { data: templates = [] } = useQuery({
-    queryKey: ["templates"],
-    queryFn: ipc.listTemplates,
-  });
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    try {
+      const r = await ipc.checkForUpdate();
+      if (r.update_available) {
+        toast.action(
+          `Perchnote ${r.latest} is available (you have ${r.current})`,
+          "View release",
+          () => ipc.openUrl(r.url),
+        );
+      } else {
+        toast.success(`You're on the latest version (${r.current})`);
+      }
+    } catch (e) {
+      toast.error(toUserMessage(e));
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
 
-  const { data: savedDefaultTemplate } = useQuery({
-    queryKey: ["setting", "default_template_id"],
-    queryFn: () => ipc.getSetting("default_template_id"),
+  const { data: fontSize = "16px" } = useQuery({
+    queryKey: ["setting", EDITOR_FONT_SIZE_KEY],
+    queryFn: () => ipc.getSetting(EDITOR_FONT_SIZE_KEY).then((v) => v || "16px"),
   });
-
-  const handleDefaultTemplateChange = async (templateId: string) => {
-    await ipc.setSetting("default_template_id", templateId);
-    queryClient.invalidateQueries({ queryKey: ["setting", "default_template_id"] });
-    const name = templates.find((t) => t.id === templateId)?.name || "None";
-    toast.success(`Default template set to ${name}`);
+  const handleFontSizeChange = async (px: string) => {
+    await ipc.setSetting(EDITOR_FONT_SIZE_KEY, px);
+    applyEditorFontSize(px);
+    queryClient.invalidateQueries({ queryKey: ["setting", EDITOR_FONT_SIZE_KEY] });
   };
 
   const handleResetAll = async () => {
     setShowResetDialog(false);
     const keys = [
       "theme", "audio_device", "whisper_model", "whisper_language",
-      "noise_cancellation", "default_template_id", "retention_days",
+      "noise_cancellation", "retention_days",
       "google_client_id", "google_client_secret",
       "microsoft_client_id", "microsoft_client_secret",
       "user_context", "custom_vocabulary",
@@ -101,7 +115,10 @@ export function GeneralSettings() {
     <div className="space-y-6">
       <div className="mb-6">
         <h2 className="text-base font-semibold text-text-primary mb-0.5">General</h2>
-        <p className="text-xs text-text-muted">Appearance and default behaviors.</p>
+        <p className="text-xs text-text-muted">
+          Appearance, editor, updates, and reset. AI note behavior lives in
+          the AI section; the default template in Templates.
+        </p>
       </div>
 
       {/* Theme */}
@@ -177,36 +194,39 @@ export function GeneralSettings() {
         </div>
       </section>
 
-      {/* About You */}
+      {/* Updates */}
       <section>
-        <h3 className="text-sm font-semibold text-text-primary mb-1">About You</h3>
-        <p className="text-xs text-text-muted mb-3">
-          Add context about your role to improve AI note quality. For example: "Product manager at a B2B SaaS startup focused on enterprise deals."
+        <h3 className="text-sm font-semibold text-text-primary mb-1">Updates</h3>
+        <p className="text-xs text-text-muted mb-2">
+          Checks GitHub for a newer release when you ask — nothing runs
+          automatically and nothing is sent beyond the request itself.
         </p>
-        <textarea
-          key={savedUserContext}
-          defaultValue={savedUserContext}
-          onChange={(e) => handleUserContextChange(e.target.value)}
-          placeholder="E.g. Senior engineer at Acme Corp, working on the payments team…"
-          rows={3}
-          className="w-full bg-bg-tertiary text-text-primary text-sm rounded-lg px-3 py-2 border border-border focus:outline-none focus:border-accent resize-none placeholder:text-text-muted/50"
-        />
+        <button
+          type="button"
+          onClick={handleCheckUpdate}
+          disabled={checkingUpdate}
+          className={secondarySettingsButtonCompactClass}
+        >
+          {checkingUpdate ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+          Check for updates
+        </button>
       </section>
 
-      {/* Default Template */}
+      {/* Editor font size */}
       <section>
-        <h3 className="text-sm font-semibold text-text-primary mb-1">Default Template</h3>
-        <p className="text-xs text-text-muted mb-3">Choose the template used when generating notes.</p>
+        <h3 className="text-sm font-semibold text-text-primary mb-1">Editor Font Size</h3>
+        <p className="text-xs text-text-muted mb-3">
+          Applies to your notes and AI notes (AI notes render one step tighter).
+        </p>
         <select
-          value={savedDefaultTemplate || ""}
-          onChange={(e) => handleDefaultTemplateChange(e.target.value)}
-          className="w-full bg-bg-tertiary text-text-primary text-sm rounded-lg px-3 py-2 border border-border focus:outline-none focus:border-accent"
+          value={fontSize}
+          onChange={(e) => handleFontSizeChange(e.target.value)}
+          aria-label="Editor font size"
+          className={`${settingsInputClass} w-full`}
         >
-          <option value="">None (use built-in default)</option>
-          {templates.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-              {t.is_default ? " (current default)" : ""}
+          {EDITOR_FONT_SIZES.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
             </option>
           ))}
         </select>
@@ -227,7 +247,7 @@ export function GeneralSettings() {
 
       {/* About */}
       <div className="pt-4 border-t border-border">
-        <p className="text-xs text-text-muted">Perchnote v0.1.0</p>
+        <p className="text-xs text-text-muted">Perchnote{appVersion ? ` v${appVersion}` : ""}</p>
       </div>
 
       <ConfirmDialog

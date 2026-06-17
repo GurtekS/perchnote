@@ -18,7 +18,7 @@ const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 /**
  * Audio playback component for recorded meetings .
  * Provides play/pause, seek, and speed controls.
- * When paired with TranscriptView, supports timestamp-synced playback.
+ * When paired with the transcript drawer, supports timestamp-synced playback.
  */
 export function AudioPlayer({ meetingId, onTimeUpdate, seekToMs, seekNonce }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -162,7 +162,7 @@ export function AudioPlayer({ meetingId, onTimeUpdate, seekToMs, seekNonce }: Au
       </button>
 
       {/* Time display */}
-      <span className="text-[11px] font-mono text-text-muted w-16 text-center shrink-0">
+      <span className="text-caption font-mono text-text-muted w-16 text-center shrink-0">
         {formatTime(currentTime)}
       </span>
 
@@ -178,14 +178,14 @@ export function AudioPlayer({ meetingId, onTimeUpdate, seekToMs, seekNonce }: Au
       />
 
       {/* Duration */}
-      <span className="text-[11px] font-mono text-text-muted w-16 text-center shrink-0">
+      <span className="text-caption font-mono text-text-muted w-16 text-center shrink-0">
         {formatTime(duration)}
       </span>
 
       {/* Speed control */}
       <button
         onClick={cycleSpeed}
-        className="text-[11px] font-mono text-text-secondary hover:text-accent px-1.5 py-0.5 rounded bg-bg-primary border border-border transition-colors"
+        className="text-caption font-mono text-text-secondary hover:text-accent px-1.5 py-0.5 rounded bg-bg-primary border border-border transition-colors"
         title="Playback speed"
       >
         {speed}x

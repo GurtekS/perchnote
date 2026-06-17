@@ -1,10 +1,14 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useReducer, useRef, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { AlertCircle, ArrowLeft, FileQuestion, Mic, Loader2, RefreshCw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ipc } from "../../lib/ipc";
+import { toUserMessage } from "../../lib/errors";
+import { scheduleMirror } from "../../lib/mirrorLifecycle";
+import { useOverlay } from "../../lib/overlayStack";
+import { setRecordingElapsedMs } from "../../lib/recordingClock";
 import { NoteEditorHandle } from "./NoteEditor";
 import { MeetingHeader } from "./MeetingHeader";
 import { TranscriptDrawer } from "./TranscriptDrawer";
@@ -17,7 +21,20 @@ import { PostRecordingScreen } from "./PostRecordingScreen";
 import { MeetingStats } from "./MeetingStats";
 import { toast } from "../../stores/toastStore";
 import { LiveTranscriptView } from "./LiveTranscriptView";
+import { RecordingAssist } from "./RecordingAssist";
 import { MetadataStrip } from "./MetadataStrip";
+import {
+  createInitialEnhancementState,
+  enhancementReducer,
+  type EnhancementAction,
+  isEnhanced as selectIsEnhanced,
+  isEnhancing as selectIsEnhancing,
+  isAnimating as selectIsAnimating,
+  animationText as selectAnimationText,
+  pendingEnhancedJson as selectPendingEnhancedJson,
+  streamPreview as selectStreamPreview,
+  saveTarget as selectSaveTarget,
+} from "./enhancementMachine";
 
 interface MeetingViewProps {
   meetingId: string;
@@ -32,7 +49,6 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useUIStore((s) => s.setSidebarCollapsed);
   const focusMode = useUIStore((s) => s.focusMode);
-  const pendingAutoStart = useUIStore((s) => s.pendingAutoStart);
   const setPendingAutoStart = useUIStore((s) => s.setPendingAutoStart);
 
   // Recording store
@@ -46,12 +62,13 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
     error: recordingError,
     clearError,
     segments: liveSegments,
+    captureHealth,
+    transcriptionStatus,
   } = useRecordingStore();
 
   // Audio device state for the recording strip
   const [activeDevice, setActiveDevice] = useState<string>("");
   const [isSwitchingDevice, setIsSwitchingDevice] = useState(false);
-  const suppressEnhanceBanner = useRef(false);
   const wasRecordingThisMeeting = useRef(false);
 
   const { data: availableDevices = [] } = useQuery({
@@ -59,6 +76,30 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
     queryFn: () => invoke<string[]>("list_audio_devices"),
     enabled: isRecording,
   });
+
+  // Gates the live "Catch me up" button (plan v9 #5) — without a provider
+  // the affordance shouldn't exist at all. Not gated on isRecording: the
+  // post-recording screen reads it after stop to decide whether instant
+  // recap is even possible.
+  const { data: aiConfigured = false } = useQuery({
+    queryKey: ["aiConfigured"],
+    queryFn: ipc.checkAiConfigured,
+    staleTime: 60_000,
+  });
+
+  // Whether instant recap will run on stop (default ON). Combined with
+  // aiConfigured + a non-empty transcript, this tells the post-recording
+  // screen that notes are coming automatically — so it should wait on them
+  // rather than offer a manual Enhance that duplicates the work.
+  const { data: autoEnhanceSetting = "" } = useQuery({
+    queryKey: ["setting", "auto_enhance_on_complete"],
+    queryFn: () => ipc.getSetting("auto_enhance_on_complete").then((v) => v ?? ""),
+    staleTime: 60_000,
+  });
+  const autoEnhanceEnabled = autoEnhanceSetting !== "false";
+  // The background instant-recap run lives outside this meeting's enhance
+  // machine (it fires from __root), so isEnhancing never sees it.
+  const autoEnhanceInFlight = useUIStore((s) => s.autoEnhancingMeetingId) === meetingId;
 
   // Sync active device from settings when recording starts. The backend
   // also emits `audio-device-active` with the actual device used (which
@@ -86,18 +127,20 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
     async (newDevice: string) => {
       if (newDevice === activeDevice || isSwitchingDevice) return;
       setIsSwitchingDevice(true);
-      suppressEnhanceBanner.current = true;
       try {
         await ipc.setSetting("audio_device", newDevice || "");
         setActiveDevice(newDevice);
+        // Stop+start on the same meeting: the backend appends to the
+        // existing WAV, keeps the original start time, offsets new
+        // transcript segments to the audio's real end, and merges talk
+        // stats — the switch no longer truncates anything.
         await stopRecording();
         await startRecording(meetingId);
         toast.success(`Switched to ${newDevice || "default mic"}`);
       } catch (e) {
-        toast.error(`Failed to switch mic: ${String(e)}`);
+        toast.error(toUserMessage(e), "Couldn't switch the mic");
       } finally {
         setIsSwitchingDevice(false);
-        suppressEnhanceBanner.current = false;
       }
     },
     [activeDevice, isSwitchingDevice, meetingId, stopRecording, startRecording]
@@ -105,18 +148,48 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
 
   // UI state
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "idle">("idle");
+  const saveStatusRef = useRef(saveStatus);
+  saveStatusRef.current = saveStatus;
   const [isTagEditing, setIsTagEditing] = useState(false);
   const [transcriptDrawerOpen, setTranscriptDrawerOpen] = useState(false);
-  const [isEnhanced, setIsEnhanced] = useState(false);
-  const [preEnhanceContent, setPreEnhanceContent] = useState<string | undefined>(undefined);
+  // Esc closes the drawer when it's the topmost layer (palette/dialogs
+  // stack above it on the ladder and close first).
+  useOverlay(transcriptDrawerOpen, () => setTranscriptDrawerOpen(false));
   const [viewMode, setViewMode] = useState<"notes" | "transcript">("notes");
-  const [notesDisplayMode, setNotesDisplayMode] = useState<"ai" | "original">("ai");
-  // Enhancement loading / animation state
-  const [isEnhancing, setIsEnhancing] = useState(false);
-  const [enhanceAnimText, setEnhanceAnimText] = useState<string | null>(null);
-  const [isAnimating, setIsAnimating] = useState(false);
-  const [pendingEnhancedJson, setPendingEnhancedJson] = useState<string | null>(null);
-  const [enhancedContent, setEnhancedContent] = useState<string | undefined>(undefined);
+  // Enhancement pipeline — ONE explicit state machine (enhancementMachine.ts)
+  // instead of the old pile of interlocking booleans. Every transition (start,
+  // stream-delta, resolve, animation-complete, undo, display-mode,
+  // meeting-switch reset) goes through the reducer; the view reads derived
+  // selectors only.
+  const [machineState, dispatchEnhancement] = useReducer(
+    enhancementReducer,
+    meetingId,
+    createInitialEnhancementState,
+  );
+  // Render against a fresh machine the instant the meeting changes — the
+  // reset effect below re-keys the stored state, but effects run after paint,
+  // and that one stale frame is exactly where the previous meeting's
+  // enhancement state could leak into this one.
+  const machine =
+    machineState.meetingId === meetingId
+      ? machineState
+      : createInitialEnhancementState(meetingId);
+  // Every action is tagged with the meeting it's dispatched for — the reducer
+  // drops stale actions from a meeting no longer on screen (the route
+  // component is REUSED across ids; this state machine already shipped one
+  // cross-meeting note-leak bug).
+  const send = useCallback(
+    (action: EnhancementAction) => dispatchEnhancement({ ...action, meetingId }),
+    [meetingId],
+  );
+  const isEnhanced = selectIsEnhanced(machine);
+  const isEnhancing = selectIsEnhancing(machine);
+  const isAnimating = selectIsAnimating(machine);
+  const notesDisplayMode = machine.displayMode;
+  const streamPreview = selectStreamPreview(machine);
+  const enhanceAnimText = selectAnimationText(machine);
+  const preEnhanceContent = machine.preEnhanceContent;
+  const enhancedContent = machine.enhancedContent;
   // Guard against concurrent note creation on new meetings
   const noteCreationInFlight = useRef(false);
   const preRecordingSidebarState = useRef(false);
@@ -165,27 +238,167 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
     } catch { return []; }
   }, [note?.generated_content]);
 
-  // Elapsed timer for recording header
+  // Elapsed timer for recording header — also feeds the module-level
+  // recording clock so the editor's block-time anchors (a TipTap plugin
+  // outside this React tree) can stamp blocks as they're typed.
   useEffect(() => {
     if (!isRecording || !meeting?.actual_start) {
       setElapsedSeconds(0);
+      setRecordingElapsedMs(null);
       return;
     }
     const tick = () => {
-      setElapsedSeconds(Math.floor((Date.now() - new Date(meeting.actual_start!).getTime()) / 1000));
+      const ms = Date.now() - new Date(meeting.actual_start!).getTime();
+      setElapsedSeconds(Math.floor(ms / 1000));
+      setRecordingElapsedMs(ms);
     };
     tick();
     const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      setRecordingElapsedMs(null);
+    };
   }, [isRecording, meeting?.actual_start]);
 
-  // Check pendingAutoStart on mount
+  // Consume pendingAutoStart per meeting — the route component is REUSED
+  // across $id changes (no remount), so mount-only consumption dropped the
+  // flag on meeting→meeting navigation and fired it later on the wrong
+  // meeting (friction audit #3: palette "Start Recording" was broken).
+  const pendingAutoStartId = useUIStore((s) => s.pendingAutoStart);
   useEffect(() => {
-    if (pendingAutoStart) {
-      setPendingAutoStart(false);
-      setTimeout(() => handleStart(), 100);
+    // Consume ONLY a flag aimed at this meeting. Subscribing to the flag
+    // (not just meetingId) means a setter targeting the meeting already on
+    // screen fires immediately instead of dangling armed — the dangling
+    // flag was a phantom recording waiting for any later navigation.
+    if (pendingAutoStartId === meetingId) {
+      setPendingAutoStart(null);
+      const t = setTimeout(() => handleStart(), 100);
+      return () => clearTimeout(t);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingId, pendingAutoStartId]);
+
+  // Live enhance stream (plan rank 1): accumulate summary words the backend
+  // emits while the model writes, shown in place of the skeleton. The text
+  // lives in the machine's enhancing phase (gone the moment the run settles);
+  // the per-meeting filter on the event payload is preserved here, and the
+  // meeting tag on the action is the reducer's second line of defense.
+  useEffect(() => {
+    if (!isEnhancing) return;
+    let unlisten: (() => void) | null = null;
+    listen<{ meeting_id: string; text: string }>("enhance-delta", (e) => {
+      if (e.payload.meeting_id === meetingId) {
+        send({ type: "stream-delta", text: e.payload.text });
+      }
+    }).then((fn) => { unlisten = fn; }).catch(() => {});
+    return () => { unlisten?.(); };
+  }, [isEnhancing, meetingId, send]);
+
+  // One-click Enhance pathing: a list-card Enhance button navigates here with
+  // this flag set; trigger the same flow as the toolbar button once mounted.
+  const setPendingAutoEnhance = useUIStore((s) => s.setPendingAutoEnhance);
+  useEffect(() => {
+    if (useUIStore.getState().pendingAutoEnhance) {
+      setPendingAutoEnhance(false);
+      const t = setTimeout(() => enhanceTriggerRef.current?.(), 400);
+      return () => clearTimeout(t);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingId]);
+
+  // Insert a transcribed line as a timestamped quote — shared by ⌘⇧D and
+  // click-to-quote in the live transcript pane.
+  const insertQuotedSegment = useCallback(
+    (seg: { text: string; start_ms: number }) => {
+      editorRef.current
+        ?.getEditor()
+        ?.chain()
+        .focus()
+        .insertContent([
+          {
+            type: "blockquote",
+            content: [
+              {
+                type: "paragraph",
+                content: [
+                  { type: "timestampChip", attrs: { ms: seg.start_ms } },
+                  { type: "text", text: ` ${seg.text.trim()}` },
+                ],
+              },
+            ],
+          },
+          { type: "paragraph" },
+        ])
+        .run();
+    },
+    [],
+  );
+
+  // ⌘D while recording: stamp the current elapsed time at the cursor so a
+  // moment can be marked without breaking listening flow (plan rank 8 v1 —
+  // the mark lands in the raw notes and travels into Enhance context), AND
+  // flag the transcript segment at that moment (plan v3 rank 6) — applied
+  // immediately if it exists, or when whisper delivers it seconds later.
+  useEffect(() => {
+    if (!isRecording) return;
+    const handler = (e: KeyboardEvent) => {
+      // ⌘⇧D: quote what was just said (plan v7 capture 8) — the latest
+      // transcribed line lands as a timestamped quote, covering the
+      // "I half-heard that, capture it verbatim" moment with zero typing.
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        const segs = useRecordingStore.getState().segments;
+        const last = segs[segs.length - 1];
+        if (last?.text?.trim()) insertQuotedSegment(last);
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        // A real inline node (plan v7 capture 6) — survives edits and
+        // replays on plain click; the old plain-text "⏱ m:ss" marks
+        // needed a fragile regex ⌘-click handler.
+        editorRef.current
+          ?.getEditor()
+          ?.chain()
+          .focus()
+          .insertContent([
+            { type: "timestampChip", attrs: { ms: elapsedSeconds * 1000 } },
+            { type: "text", text: " " },
+          ])
+          .run();
+        ipc.highlightMoment(meetingId, elapsedSeconds * 1000).catch(() => {});
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isRecording, elapsedSeconds, meetingId, insertQuotedSegment]);
+
+  // Search → jump-to-moment: a search result navigates here with a pending
+  // seek; open the drawer and hand it the (buffered) seek request. Keyed on
+  // meetingId, not mount — see pendingAutoStart above. Consume only entries
+  // parked for THIS meeting: a seek whose navigation never landed (deleted
+  // meeting, failed route) must not replay in the next meeting opened — it
+  // stays parked until its meeting consumes it or the next setPendingSeek
+  // overwrites it (single-slot semantics).
+  useEffect(() => {
+    const pending = useUIStore.getState().pendingSeek;
+    if (!pending || pending.meetingId !== meetingId) return;
+    useUIStore.getState().clearPendingSeek();
+    setTranscriptDrawerOpen(true);
+    const ms = pending.ms;
+    const t = setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("seek-audio", { detail: { ms } }));
+    }, 250);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingId]);
+
+  // Source chips dispatch seek-audio; make sure the drawer (which owns the
+  // audio element and performs the seek) is open to receive it.
+  useEffect(() => {
+    const handler = () => setTranscriptDrawerOpen(true);
+    window.addEventListener("seek-audio", handler);
+    return () => window.removeEventListener("seek-audio", handler);
   }, []);
 
   // Listen for open-transcript-drawer DOM event (dispatched by __root.tsx Cmd+T handler)
@@ -194,6 +407,21 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
     document.addEventListener("open-transcript-drawer", handler);
     return () => document.removeEventListener("open-transcript-drawer", handler);
   }, []);
+
+  // Empty recording discarded (backend deleted the row because the stop
+  // captured no audio and no notes): if it's the meeting on screen, leave
+  // for home rather than render a deleted meeting. Keyed on meetingId so a
+  // stale listener can't navigate away from an unrelated meeting.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen<{ meeting_id: string }>("meeting-discarded", (e) => {
+      if (e.payload.meeting_id !== meetingId) return;
+      setReviewMode(false);
+      toast.info("Empty recording discarded — no audio was captured");
+      navigate({ to: "/" });
+    }).then((fn) => { unlisten = fn; }).catch(() => {});
+    return () => { unlisten?.(); };
+  }, [meetingId, navigate]);
 
   // Listen for palette-enhance-notes (dispatched by the CommandPalette when
   // the user picks Enhance Notes). Calls into the same trigger the bottom
@@ -209,7 +437,10 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
-        toast.info("Notes auto-saved");
+        // Honest copy (whole-app review P3): a save may still be debouncing
+        // or have failed — report the actual state, not a placebo.
+        if (saveStatusRef.current === "saving") toast.info("Saving…");
+        else toast.info("Notes auto-save as you type");
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -233,7 +464,13 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
     const speakerCount = segs.length > 0
       ? new Set(segs.map((s) => s.speaker).filter(Boolean)).size || null
       : null;
-    const duration = meeting?.actual_start
+    // The transcript timeline excludes paused stretches (the mixer skips
+    // writes while paused) — wall-clock counted a 20-minute pause as
+    // meeting time (whole-app review P3). Prefer the audio timeline.
+    const lastMs = segs.length > 0 ? segs[segs.length - 1].end_ms : 0;
+    const duration = lastMs > 0
+      ? Math.floor(lastMs / 1000)
+      : meeting?.actual_start
       ? Math.floor((Date.now() - new Date(meeting.actual_start).getTime()) / 1000)
       : 0;
 
@@ -252,30 +489,46 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
     setReviewMode(true);
   }, [stopRecording, queryClient, meetingId, liveSegments, meeting?.actual_start, focusMode, setSidebarCollapsed]);
 
-  // Note update handler with auto-save
+  // Resolve the note row id, creating one atomically if it doesn't exist yet.
+  // Centralizes row creation so AI and raw saves never race into duplicate rows
+  // and AI content never gets misrouted into raw_content for a row-less meeting.
+  const ensureNoteId = useCallback(async (): Promise<string | null> => {
+    if (note?.id) return note.id;
+    if (noteCreationInFlight.current) return null;
+    noteCreationInFlight.current = true;
+    try {
+      const ensured = await ipc.getOrCreateNote(meetingId);
+      queryClient.invalidateQueries({ queryKey: ["note", meetingId] });
+      return ensured.id;
+    } finally {
+      noteCreationInFlight.current = false;
+    }
+  }, [note?.id, meetingId, queryClient]);
+
+  // Auto-save for the MAIN editor. It holds the AI notes whenever the meeting
+  // is enhanced (AI or Split view) and the user's own notes otherwise — the
+  // save target comes from the machine's saveTarget selector, never from
+  // scattered booleans. The "My Notes" editor saves via handleOriginalUpdate,
+  // so this never needs the display mode.
+  const saveTarget = selectSaveTarget(machine);
   const handleNoteUpdate = useCallback(
     async (json: string) => {
       setSaveStatus("saving");
       try {
-        if (note?.id) {
-          if (isEnhanced && notesDisplayMode === "ai") {
-            // Edits in AI mode flow to generated_content so checkbox state survives reload.
-            await ipc.updateNoteGeneratedContent(note.id, json);
-          } else {
-            await ipc.updateNoteRawContent(note.id, json);
-          }
-        } else {
-          // Guard against concurrent createNote calls from rapid debounce fires
-          if (noteCreationInFlight.current) return;
-          noteCreationInFlight.current = true;
-          try {
-            const newNote = await ipc.createNote(meetingId);
-            await ipc.updateNoteRawContent(newNote.id, json);
-            queryClient.invalidateQueries({ queryKey: ["note", meetingId] });
-          } finally {
-            noteCreationInFlight.current = false;
-          }
+        const id = await ensureNoteId();
+        if (!id) {
+          setSaveStatus("idle");
+          return;
         }
+        if (saveTarget === "generated_content") {
+          // Enhanced → this editor is the AI surface; persist to generated_content.
+          await ipc.updateNoteGeneratedContent(id, json);
+        } else {
+          await ipc.updateNoteRawContent(id, json);
+        }
+        // Mirror follows the note (plan v8 B2): refresh the vault .md once
+        // the edits settle. Fire-and-forget — never in the save's way.
+        scheduleMirror(meetingId);
         setSaveStatus("saved");
         setTimeout(() => setSaveStatus("idle"), 2000);
       } catch {
@@ -283,74 +536,69 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
         setSaveStatus("idle");
       }
     },
-    [note?.id, meetingId, queryClient, isEnhanced, notesDisplayMode]
+    [ensureNoteId, saveTarget, meetingId]
   );
 
-  // Reset all enhancement state when navigating to a different meeting
+  // Commit the meeting-switch reset (the derived `machine` above already
+  // renders fresh for the new meeting before this lands). Declared before the
+  // restore effect below so the reset is processed first.
   useEffect(() => {
-    hasRestoredEnhance.current = false;
     wasRecordingThisMeeting.current = false;
     noteCreationInFlight.current = false;
-    setIsEnhanced(false);
-    setEnhancedContent(undefined);
-    setPreEnhanceContent(undefined);
-    setIsEnhancing(false);
-    setIsAnimating(false);
-    setEnhanceAnimText(null);
-    setPendingEnhancedJson(null);
-    setNotesDisplayMode("ai");
-  }, [meetingId]);
+    send({ type: "reset" });
+  }, [meetingId, send]);
 
-  // On mount/note-change: detect generated_content and restore enhanced state
-  const hasRestoredEnhance = useRef(false);
+  // On mount/note-change: detect generated_content and restore enhanced state.
+  // The mode switch and imperative editor seed happen once per meeting
+  // (machine.hasRestored), but note-loaded fires on every refetch — external
+  // writers (the tasks view toggling an action item) update the note and
+  // invalidate this query, and their changes would otherwise be lost to the
+  // first cached snapshot.
   useEffect(() => {
-    if (note?.generated_content && !hasRestoredEnhance.current && !isAnimating) {
-      hasRestoredEnhance.current = true;
-      setIsEnhanced(true);
-      setNotesDisplayMode("ai");
-      setPreEnhanceContent(note.raw_content || undefined);
-      setEnhancedContent(note.generated_content);
-      if (editorRef.current) {
-        editorRef.current.setContent(note.generated_content);
-      }
+    if (!note?.generated_content || isAnimating) return;
+    if (!machine.hasRestored && editorRef.current) {
+      editorRef.current.setContent(note.generated_content);
     }
-  }, [note?.generated_content, isAnimating]);
+    send({ type: "note-loaded", generated: note.generated_content, raw: note.raw_content || undefined });
+  }, [note?.generated_content, note?.raw_content, isAnimating, machine.hasRestored, send]);
 
-  // Enhancement handlers
+  // Enhancement handlers. EnhanceButton only calls this after its startedFor
+  // guard confirmed the run resolved for the meeting still on screen.
   const handleEnhanced = useCallback(
     (enhancedJson: string, rawMarkdown: string) => {
-      // Keep original in state for undo
-      setPreEnhanceContent(note?.raw_content || undefined);
-      setIsEnhanced(true);
-      setNotesDisplayMode("ai");
-        setEnhancedContent(enhancedJson);
-      // Start animation — editor content set in onComplete
-      setEnhanceAnimText(rawMarkdown);
-      setPendingEnhancedJson(enhancedJson);
-      setIsAnimating(true);
+      // resolve → animating: keeps the original for undo, records the AI
+      // body, and arms the typewriter overlay (editor content is injected on
+      // animation-complete).
+      send({
+        type: "resolve",
+        enhancedJson,
+        rawMarkdown,
+        rawContent: note?.raw_content || undefined,
+      });
     },
-    [note?.raw_content]
+    [note?.raw_content, send]
   );
 
+  // Auto-save for the "My Notes" editor — always persists to raw_content,
+  // creating the note row first if needed so original notes are never dropped.
   const handleOriginalUpdate = useCallback(
     async (json: string) => {
-      setPreEnhanceContent(json);
-      // Persist original notes edits to raw_content
+      send({ type: "original-saved", json });
       try {
-        if (note?.id) {
-          await ipc.updateNoteRawContent(note.id, json);
+        const id = await ensureNoteId();
+        if (id) {
+          await ipc.updateNoteRawContent(id, json);
+          scheduleMirror(meetingId);
         }
       } catch {
         // non-fatal
       }
     },
-    [note?.id]
+    [ensureNoteId, meetingId, send]
   );
 
   const handleUndoEnhance = useCallback(() => {
-    setIsEnhanced(false);
-    setNotesDisplayMode("ai");
-    setEnhancedContent(undefined);
+    send({ type: "undo" });
     const original = preEnhanceContent ?? note?.raw_content;
     if (editorRef.current) {
       editorRef.current.setContent(
@@ -358,12 +606,18 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
       );
     }
     toast.info("Enhancement reverted");
-  }, [preEnhanceContent, note?.raw_content]);
+  }, [preEnhanceContent, note?.raw_content, send]);
 
   // Re-inject enhanced content when switching back to AI Notes tab, or when the
   // editor remounts after the isEnhancing skeleton is dismissed (!isEnhancing)
   useEffect(() => {
-    if (!isEnhancing && notesDisplayMode === "ai" && isEnhanced && enhancedContent && editorRef.current) {
+    if (
+      !isEnhancing &&
+      (notesDisplayMode === "ai" || notesDisplayMode === "split") &&
+      isEnhanced &&
+      enhancedContent &&
+      editorRef.current
+    ) {
       editorRef.current.setContent(enhancedContent);
     }
   }, [isEnhancing, notesDisplayMode, isEnhanced, enhancedContent]);
@@ -401,12 +655,21 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
       {recordingError && (
         <div role="alert" className="px-6 py-2 bg-red-500/10 border-b border-red-500/30 text-red-400 text-sm flex items-center justify-between shrink-0">
           <span>{recordingError}</span>
-          <button
-            onClick={clearError}
-            className="text-red-400/60 hover:text-red-400 ml-4"
-          >
-            &times;
-          </button>
+          <div className="flex items-center gap-2 ml-4 shrink-0">
+            <button
+              onClick={() => { clearError(); handleStart(); }}
+              className="px-2 py-0.5 rounded border border-red-400/40 text-xs text-red-300 hover:bg-red-500/15"
+            >
+              Retry
+            </button>
+            <button
+              onClick={clearError}
+              aria-label="Dismiss error"
+              className="text-red-400/60 hover:text-red-400"
+            >
+              &times;
+            </button>
+          </div>
         </div>
       )}
 
@@ -419,10 +682,13 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
         elapsedSeconds={elapsedSeconds}
       />
 
-      {/* Tags bar */}
-      <div className={`px-6 py-2 shrink-0 ${meetingTags.length > 0 || isTagEditing ? "border-b border-border" : ""}`}>
-        <TagEditor meetingId={meetingId} onEditingChange={setIsTagEditing} />
-      </div>
+      {/* Tags bar — hidden while recording: nothing competes with capture
+          (plan v7 quiet mode). */}
+      {!isRecording && (
+        <div className={`px-6 py-2 shrink-0 ${meetingTags.length > 0 || isTagEditing ? "border-b border-border" : ""}`}>
+          <TagEditor meetingId={meetingId} onEditingChange={setIsTagEditing} />
+        </div>
+      )}
 
       {/* View mode toggle + device picker — only visible while recording */}
       {isRecording && (
@@ -462,7 +728,7 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
           {/* Mic device selector */}
           <div className="flex min-w-0 items-center gap-1.5 sm:ml-auto">
             {isSwitchingDevice ? (
-              <span className="flex items-center gap-1.5 text-[11px] text-text-muted">
+              <span className="flex items-center gap-1.5 text-caption text-text-muted">
                 <Loader2 size={11} className="animate-spin shrink-0" />
                 Switching mic…
               </span>
@@ -472,7 +738,7 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
                 <select
                   value={activeDevice}
                   onChange={(e) => handleSwitchDevice(e.target.value)}
-                  className="max-w-[220px] truncate bg-transparent text-[11px] text-text-secondary focus:outline-none cursor-pointer sm:max-w-[160px]"
+                  className="max-w-[220px] truncate bg-transparent text-caption text-text-secondary focus:outline-none cursor-pointer sm:max-w-[160px]"
                   title="Switch microphone"
                   aria-label="Switch microphone"
                 >
@@ -487,6 +753,58 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
         </div>
       )}
 
+      {/* Capture health — PERSISTENT while degraded (a transient toast dies
+          unseen under a fullscreen call); clears itself on recovery. */}
+      {isRecording && captureHealth && (
+        <div
+          role="alert"
+          className="flex shrink-0 items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-1.5 sm:px-6"
+        >
+          <AlertCircle size={12} className="shrink-0 text-amber-500" />
+          <span className="text-xs font-medium text-amber-500">
+            {captureHealth.mixer === "dead"
+              ? "Audio capture stopped — stop and restart the recording. Audio up to now is saved."
+              : [
+                  captureHealth.mic === "stalled"
+                    ? "Mic silent — check the input device"
+                    : captureHealth.mic === "rebuilding"
+                    ? "Mic silent — reconnecting…"
+                    : null,
+                  captureHealth.system === "permission_lost"
+                    ? "Screen Recording revoked — participants' audio is no longer captured"
+                    : captureHealth.system === "silent"
+                    ? "No system audio for a while — if the call isn't just quiet, participants may not be captured"
+                    : captureHealth.system === "stalled"
+                    ? "System audio stopped — attempting recovery"
+                    : captureHealth.system === "rebuilding"
+                    ? "Rebuilding system audio capture…"
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+          </span>
+        </div>
+      )}
+
+      {/* Transcription health (whole-app review P1): the backend emits
+          "model not found" / "transcription stopped" the moment they
+          happen — this used to be stored and rendered NOWHERE, so users
+          recorded hour-long meetings against a dead transcriber and found
+          out at "0 transcript segments". Same persistent posture as
+          captureHealth: audio still records either way. */}
+      {isRecording && transcriptionStatus && (
+        <div
+          role="alert"
+          className="flex shrink-0 items-center gap-2 border-b border-recording/30 bg-recording/10 px-4 py-1.5 sm:px-6"
+        >
+          <AlertCircle size={12} className="shrink-0 text-recording" />
+          <span className="text-xs font-medium text-recording">
+            {transcriptionStatus} — audio is still being recorded and can be
+            transcribed later from Settings → Audio.
+          </span>
+        </div>
+      )}
+
       {/* Main content area — PostRecordingScreen or notepad */}
       {reviewMode && reviewData ? (
         <PostRecordingScreen
@@ -494,6 +812,11 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
           duration={reviewData.duration}
           segmentCount={reviewData.segmentCount}
           speakerCount={reviewData.speakerCount}
+          autoEnhanceExpected={
+            autoEnhanceEnabled && aiConfigured && reviewData.segmentCount > 0
+          }
+          isEnhancing={isEnhancing || autoEnhanceInFlight}
+          isEnhanced={isEnhanced || !!note?.generated_content}
           onEnhance={() => {
             setReviewMode(false);
             setTimeout(() => enhanceTriggerRef.current?.(), 50);
@@ -506,14 +829,41 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
         />
       ) : (
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Notepad or live transcript */}
-        <div className="min-w-0 flex-1 overflow-y-auto">
-          {isRecording && viewMode === "transcript" ? (
-            <LiveTranscriptView segments={liveSegments} />
-          ) : (
+        {/* Notepad and live transcript — BOTH stay mounted while recording;
+            visibility (not unmount) flips between them, so the editor keeps
+            its caret/undo state and each pane keeps its scroll position
+            (plan v7 capture 5: the flip used to lose all of it mid-call). */}
+        <div className="relative min-w-0 flex-1 overflow-hidden">
+          {isRecording && (
+            <div
+              className={`absolute inset-0 ${
+                viewMode === "transcript" ? "" : "invisible pointer-events-none"
+              }`}
+            >
+              <LiveTranscriptView
+                segments={liveSegments}
+                onQuote={insertQuotedSegment}
+              />
+            </div>
+          )}
+          {/* Catch-me-up + Ask AI pills overlay the pane CONTAINER, not the
+              transcript pane, so they're visible in the default Notes view
+              too — the late joiner who stays on Notes never saw them
+              (deep review P2). */}
+          {isRecording && (
+            <RecordingAssist
+              segmentCount={liveSegments.length}
+              catchMeUp={aiConfigured ? () => ipc.catchMeUp(meetingId) : undefined}
+            />
+          )}
+          <div
+            className={`absolute inset-0 overflow-y-auto ${
+              isRecording && viewMode === "transcript" ? "invisible pointer-events-none" : ""
+            }`}
+          >
             <div className="mx-auto w-full max-w-[860px] px-4 py-5 sm:px-6">
-              {/* Meeting metadata */}
-              {meeting && (
+              {/* Meeting metadata — quiet mode hides it during capture */}
+              {meeting && !isRecording && (
                 <MetadataStrip
                   meeting={meeting}
                   onSaved={() => queryClient.invalidateQueries({ queryKey: ["meeting", meetingId] })}
@@ -533,13 +883,17 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
 
               <NotesSurface
                 meetingId={meetingId}
+                isRecording={isRecording}
                 editorRef={editorRef}
                 noteLoading={noteLoading}
+                note={note}
                 noteRawContent={note?.raw_content || undefined}
+                streamPreview={streamPreview}
                 preEnhanceContent={preEnhanceContent}
+                enhancedContent={enhancedContent}
                 isEnhanced={isEnhanced}
                 notesDisplayMode={notesDisplayMode}
-                onNotesDisplayModeChange={setNotesDisplayMode}
+                onNotesDisplayModeChange={(mode) => send({ type: "display-mode", mode })}
                 isEnhancing={isEnhancing}
                 isAnimating={isAnimating}
                 enhanceAnimText={enhanceAnimText}
@@ -547,17 +901,16 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
                 onOriginalUpdate={handleOriginalUpdate}
                 aiTags={aiTags}
                 onAnimationComplete={() => {
-                  setIsAnimating(false);
-                  setEnhanceAnimText(null);
-                  if (pendingEnhancedJson && editorRef.current) {
-                    editorRef.current.setContent(pendingEnhancedJson);
+                  const pending = selectPendingEnhancedJson(machine);
+                  send({ type: "animation-complete" });
+                  if (pending && editorRef.current) {
+                    editorRef.current.setContent(pending);
                   }
-                  setPendingEnhancedJson(null);
                   queryClient.invalidateQueries({ queryKey: ["note", meetingId] });
                 }}
               />
             </div>
-          )}
+          </div>
         </div>
 
         {/* Transcript drawer */}
@@ -584,10 +937,12 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
         isEnhanced={isEnhanced}
         onEnhanced={handleEnhanced}
         onUndoEnhance={handleUndoEnhance}
-        onEnhancingChange={(enhancing) => {
-          setIsEnhancing(enhancing);
-          if (enhancing) hasRestoredEnhance.current = true;
-        }}
+        onEnhancingChange={(enhancing) =>
+          // `start` latches machine.hasRestored: the run invalidates the note
+          // query mid-flight and that refetch must not re-trigger the
+          // restore path.
+          send(enhancing ? { type: "start" } : { type: "enhance-finished" })
+        }
         enhanceTriggerRef={enhanceTriggerRef}
         onPause={pauseRecording}
         onResume={resumeRecording}
@@ -661,7 +1016,7 @@ function MeetingFallbackState({
                 type="button"
                 onClick={onRetry}
                 disabled={busy}
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border px-3 text-sm text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary disabled:opacity-50"
+                className="btn btn-secondary"
               >
                 <RefreshCw size={14} className={busy ? "animate-spin" : ""} />
                 Retry
@@ -671,7 +1026,7 @@ function MeetingFallbackState({
               <button
                 type="button"
                 onClick={onReturn}
-                className="inline-flex h-9 items-center justify-center rounded-lg bg-accent px-3 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
+                className="btn btn-primary"
               >
                 Back to Today
               </button>

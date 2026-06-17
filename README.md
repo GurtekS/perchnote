@@ -8,9 +8,11 @@
 
 [**perchnote.com**](https://perchnote.com)
 
-Local-first meeting notes for macOS. It records you, transcribes
-everything on your machine with whisper.cpp, then uses the Anthropic API
-to turn the transcript into structured notes.
+Local-first meeting notes for macOS. It records mic + system audio,
+transcribes everything on your machine with whisper.cpp (in-process,
+Metal), and turns transcripts into structured, source-cited notes with
+the AI you choose — Anthropic API, local Ollama, or Apple Intelligence.
+Without any AI configured it's still a fast meeting notepad.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 ![Platform: macOS 14+](https://img.shields.io/badge/platform-macOS%2014+-000000?logo=apple&logoColor=white)
@@ -26,26 +28,75 @@ to turn the transcript into structured notes.
 The audio, transcripts, and notes all stay on your machine in a local
 SQLite database. The only things that ever leave are calls you turn on
 yourself: calendar sync, Slack sharing, and the Anthropic API when you
-ask for AI notes.
+ask for AI notes (once enabled, that includes a weekly auto-refresh of
+your "About You" profile, built from your own meeting notes — editing
+the field turns it off).
 
 ## ✨ Features
 
-- **Recording.** Mic and system audio at the same time, using Core Audio
-  process taps. No virtual cable or Loopback license needed.
-- **On-device transcription.** whisper.cpp runs locally. Pick from Base,
-  Small, Medium, or Large-v3-Turbo in Settings.
-- **AI notes.** Your transcript plus a template (decisions, action items,
-  sales call, 1:1, etc.) gets summarized by Claude through the
-  [Anthropic API](https://docs.anthropic.com/en/api/getting-started).
-  Pick Opus 4.7, Sonnet 4.6, or Haiku 4.5 in Settings → AI. It's optional;
-  without a key the app still works as a manual notepad.
-- **Calendar integration.** Google Calendar OAuth, Microsoft Graph OAuth,
-  or any read-only ICS feed. Past events you actually recorded stay in
-  the sidebar. Ones you ignored drop out.
-- **Search.** Full-text across titles, transcripts, and notes via SQLite
-  FTS5.
-- **Sharing.** Export to HTML, copy as Markdown, post to a Slack webhook.
-- **Speaker diarization.** Optional, AI-assisted.
+- **Never miss a recording.** When Zoom, Teams, or your browser starts
+  using the mic, Perchnote offers one-click recording into the calendar
+  event you're in — it checks *which app* uses the mic, never audio.
+- **Recording.** Mic and system audio simultaneously via Core Audio
+  process taps — no bot joins your call, no virtual cable needed.
+  Optional stereo (you left, them right). Or skip recording entirely:
+  drop any audio file — a Voice Memo, an Apple Notes call recording —
+  onto the window and it becomes a fully transcribed meeting.
+- **On-device transcription.** whisper.cpp runs in-process on Metal
+  (no Homebrew required), behind a Silero voice-activity gate with
+  hallucination filters and beam-search decoding. Models from fast
+  Base to Large-v3-Turbo, downloadable in Settings.
+- **Speaker recognition.** Neural diarization (pyannote-grade, on
+  CoreML) with automatic fallback; one Speakers panel to name, merge,
+  and re-detect — names propagate everywhere instantly.
+- **AI notes you can verify.** Summaries stream live as they're
+  written; the model extracts verbatim quotes before composing; action
+  items and section bullets carry ▸ m:ss chips that replay the cited
+  moment. Ask AI answers cite their sources the same way — [1] chips
+  that play the moment a claim came from. "Catch me up" recaps a live
+  meeting you joined late; Recipes run your saved prompts ("draft the
+  follow-up email") against any meeting. Provider-pluggable:
+  Anthropic, Ollama (qwen3 recommended), or Apple Intelligence — all
+  optional.
+- **Instant recap.** Recordings enhance themselves on completion;
+  "Notes ready — 3 action items" arrives as a notification.
+- **The full task loop.** Cross-meeting rollup with write-back,
+  due-date buckets, snooze that never touches meeting-stated deadlines,
+  stale-item triage (Done/Snooze/Drop), a Monday week-in-review,
+  idempotent Apple Reminders export with completion sync back, and a
+  one-click hand-off to Things.
+- **Meeting continuity.** Recurring meetings open with last time's
+  summary and a one-click carry-over of unfinished items; templates
+  bind per series; ⌘D flags important moments live and weighs them
+  into the summary.
+- **Search that finds the moment.** ⌘K searches titles, notes, and
+  transcripts per-sentence — results carry what was said and jump
+  playback to it. Filters work everywhere, including Ask AI:
+  `speaker:amy`, `folder:work`, `before:`/`after:` dates,
+  `"exact phrase"`, `budg*`. Misheard a name? Edit any transcript
+  line, or fix it everywhere with find-and-replace — search and
+  citations re-sync.
+  Optional local semantic recall (sqlite-vec + Ollama embeddings)
+  finds meaning, not just keywords. Topic trackers count your terms;
+  talk-balance shows you-vs-them speaking time.
+- **Your data is files when you want it.** Checksummed `.perchnote`
+  backup archives with verified restore; an optional Markdown mirror
+  to Documents/Perchnote (flat, by month, or by folder) that follows
+  your edits, renames, and deletes — frontmatter carries tags, a deep
+  link back, and the recording's path for Dataview.
+- **Automation.** `perchnote://record/start?title=Standup`,
+  `/record/stop`, `/meeting/<id>/transcript`, and `/search?q=` deep
+  links with x-callback-url support — recipes for Shortcuts, Raycast,
+  and Stream Deck in [`docs/SHORTCUTS.md`](./docs/SHORTCUTS.md). Plus a
+  [local read-only MCP server](#-use-with-claude-mcp) so Claude can
+  search your meetings without anything leaving the machine.
+- **Keyboard-first.** ⌘N records instantly, ⌘1–⌘5 switch sections,
+  ⌘[/⌘] retrace your path, ⌘K searches everything, ⌘/ shows the rest.
+- **Calendar integration.** Google Calendar OAuth, Microsoft Graph
+  OAuth, or any read-only ICS feed.
+- **Self-maintaining.** Daily database backups, crash recovery that
+  repairs interrupted recordings, a unified rotating log, and an
+  "About You" profile that writes itself from your meeting history.
 
 ## 📋 Requirements
 
@@ -55,12 +106,13 @@ ask for AI notes.
 - [Rust](https://rustup.rs/) (stable)
 - Xcode Command Line Tools (`xcode-select --install`). The Swift
   process-tap helper in `src-tauri/swift/` gets compiled during the build.
-- An [Anthropic API key](https://console.anthropic.com/settings/keys) if
-  you want AI features. Paste it into Settings → AI. It goes straight into
-  the macOS Keychain and never touches the codebase.
-- A Whisper model. Download one from Settings → Audio, or install
-  `whisper-cpp` via Homebrew and the app will pick up its model directory
-  automatically.
+- For AI features (optional): an
+  [Anthropic API key](https://console.anthropic.com/settings/keys)
+  (stored in the macOS Keychain), a local [Ollama](https://ollama.com)
+  with a model pulled, or Apple Intelligence on macOS 26+.
+- A Whisper model — downloaded in Settings → Audio (or during
+  onboarding). No Homebrew or external binaries required; whisper runs
+  inside the app.
 
 ## 📥 Install
 
@@ -133,6 +185,52 @@ npx tauri icon assets/icon-source.png
 
 This rewrites everything under `src-tauri/icons/` including the macOS
 `.icns`.
+
+## 🤖 Use with Claude (MCP)
+
+`perchnote-mcp` is a small read-only [MCP](https://modelcontextprotocol.io)
+server over your meeting database. Your MCP client spawns it locally and
+talks to it over stdio — no port, no network listener, no account. It
+exposes four tools: `search_meetings` (same filter grammar as in-app
+search: `speaker:`, `folder:`, `before:`/`after:`, `"phrases"`, `prefix*`),
+`get_meeting`, `get_transcript`, and `list_open_action_items`. It can
+never write, and calendar attendee data is never exposed — see
+[`docs/SECURITY.md`](./docs/SECURITY.md).
+
+Build it:
+
+```sh
+cd src-tauri
+cargo build --release --bin perchnote-mcp
+# binary: src-tauri/target/release/perchnote-mcp
+```
+
+Then add it to `~/Library/Application Support/Claude/claude_desktop_config.json`
+(Claude Desktop → Settings → Developer → Edit Config), adjusting the path
+to where you cloned the repo:
+
+```json
+{
+  "mcpServers": {
+    "perchnote": {
+      "command": "/path/to/perchnote/src-tauri/target/release/perchnote-mcp"
+    }
+  }
+}
+```
+
+For Claude Code it's one command:
+
+```sh
+claude mcp add perchnote /path/to/perchnote/src-tauri/target/release/perchnote-mcp
+```
+
+By default it reads the production database
+(`~/Library/Application Support/com.perchnote.app/perchnote.db`, safe
+while the app is running — WAL handles concurrent reads). Point it
+elsewhere with `--db <path>` or the `PERCHNOTE_DB` env var. The binary
+refuses databases whose schema doesn't match the version it was built
+from, so rebuild it when you update the app.
 
 ## 🔒 Security posture
 

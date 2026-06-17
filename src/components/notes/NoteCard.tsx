@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { format } from "date-fns";
-import { Mic, Lock, Volume2, MapPin, Clock, Monitor } from "lucide-react";
+import { Mic, Lock, Volume2, MapPin, Clock, Monitor, Sparkles, Video } from "lucide-react";
+import { useUIStore } from "../../stores/uiStore";
 import { useQueryClient } from "@tanstack/react-query";
 import { FolderInput } from "lucide-react";
 import { Meeting, Folder, SearchResult, openLocation, isLocationUrl } from "../../lib/ipc";
@@ -11,6 +12,7 @@ import { ConfirmDialog } from "../shared/ConfirmDialog";
 import { useFolders } from "../../hooks/useFolders";
 import { buildFolderTree, ipc } from "../../lib/ipc";
 import { toast } from "../../stores/toastStore";
+import { toUserMessage } from "../../lib/errors";
 
 // Color palette for meeting avatars — muted, accessible, neutral tones.
 const AVATAR_COLORS = [
@@ -87,6 +89,7 @@ export function NoteCard({
   currentFolderId,
   meetingFolderIds,
 }: NoteCardProps) {
+  const navigate = useNavigate();
   const dateStr = meeting.scheduled_start || meeting.actual_start || meeting.created_at;
   const timeStr = dateStr ? format(new Date(dateStr), "h:mm a") : "";
 
@@ -138,7 +141,7 @@ export function NoteCard({
               queryClient.invalidateQueries({ queryKey: ["meetings"] });
               queryClient.invalidateQueries({ queryKey: ["folders"] });
               queryClient.invalidateQueries({ queryKey: ["meetings", "folder", node.id] });
-            } catch (e) { toast.error(String(e)); }
+            } catch (e) { toast.error(toUserMessage(e)); }
           },
         });
         walkTree(node.children, depth + 1);
@@ -165,7 +168,7 @@ export function NoteCard({
           queryClient.invalidateQueries({ queryKey: ["folders"] });
           queryClient.invalidateQueries({ queryKey: ["meetings", "folder", currentFolderId] });
           queryClient.invalidateQueries({ queryKey: ["folderMeetings", currentFolderId] });
-        } catch (e) { toast.error(String(e)); }
+        } catch (e) { toast.error(toUserMessage(e)); }
       },
     }] : []),
     {
@@ -182,17 +185,30 @@ export function NoteCard({
         <Link
           to="/meeting/$id"
           params={{ id: meeting.id }}
-          className={`flex items-center gap-3 px-4 py-2 rounded-md transition-colors duration-100 group ${
-            selected ? "bg-accent/8" : "hover:bg-bg-hover"
+          className={`flex items-center gap-3 px-4 py-2 rounded-[var(--radius-md)] border border-transparent transition-colors duration-100 group ${
+            selected
+              ? "bg-accent/8 shadow-[inset_2.5px_0_0_var(--color-accent)]"
+              : "hover:bg-bg-hover hover:border-border/60"
           }`}
           aria-label={`Open ${meeting.title}`}
-          title="Open meeting. Drag to a folder or use the context menu for more actions."
+          title={
+            searchMatch?.match_start_ms != null
+              ? "Open meeting at the matching moment"
+              : "Open meeting. Drag to a folder or use the context menu for more actions."
+          }
+          onClick={() => {
+            // Search → jump-to-moment: MeetingView consumes this on mount,
+            // keyed to this meeting so it can't replay anywhere else.
+            if (searchMatch?.match_start_ms != null) {
+              useUIStore.getState().setPendingSeek(meeting.id, searchMatch.match_start_ms);
+            }
+          }}
           draggable
           onDragStart={e => e.dataTransfer.setData("meetingId", meeting.id)}
         >
           {/* Avatar circle */}
           <div
-            className="w-8 h-8 rounded-full flex items-center justify-center text-white text-[13px] font-semibold shrink-0 select-none"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-white text-body-sm font-semibold shrink-0 select-none"
             style={{ background: avatarColor }}
           >
             {meeting.status === "recording" ? (
@@ -207,17 +223,21 @@ export function NoteCard({
 
           {/* Main content */}
           <div className="flex-1 min-w-0">
-            <p className="text-[13px] font-medium text-text-primary leading-tight line-clamp-2">
+            <p className="text-body-sm font-medium text-text-primary leading-tight line-clamp-2">
               {meeting.status === "recording" && (
                 <Mic size={10} className="inline mr-1.5 text-recording" />
               )}
               {meeting.title}
             </p>
             {subline && (
-              <p className="text-[11px] text-text-muted line-clamp-2 mt-0.5 leading-tight">
+              <p className="text-caption text-text-muted line-clamp-2 mt-0.5 leading-tight">
                 {showMatchSnippet && (
                   <span className="text-accent/60 mr-1">
-                    {searchMatch!.match_source === "transcript" ? "Transcript:" : "Notes:"}
+                    {searchMatch!.match_source === "transcript"
+                      ? "Transcript:"
+                      : searchMatch!.match_source === "semantic"
+                      ? "Related:"
+                      : "Notes:"}
                   </span>
                 )}
                 {subline}
@@ -226,15 +246,25 @@ export function NoteCard({
             {tags.length > 0 && (
               <div className="flex gap-1 mt-0.5">
                 {tags.slice(0, 2).map((tag) => (
-                  <span
+                  // Tags read path (deep review P2: tags were write-only —
+                  // collected everywhere, clickable nowhere). A chip click
+                  // opens /meetings filtered to that tag.
+                  <button
+                    type="button"
                     key={tag}
-                    className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent/80"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      navigate({ to: "/meetings", search: { tag } });
+                    }}
+                    className="text-footnote px-1.5 py-0.5 rounded-full bg-accent/10 text-accent/80 hover:bg-accent/20 hover:text-accent transition-colors"
+                    title={`Show all meetings tagged “${tag}”`}
                   >
                     {tag}
-                  </span>
+                  </button>
                 ))}
                 {tags.length > 2 && (
-                  <span className="text-[10px] text-text-muted">+{tags.length - 2}</span>
+                  <span className="text-footnote text-text-muted">+{tags.length - 2}</span>
                 )}
               </div>
             )}
@@ -242,7 +272,7 @@ export function NoteCard({
             {(duration || meeting.location || (meeting.platform && meeting.platform !== "unknown")) && (
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 {duration && (
-                  <span className="flex items-center gap-0.5 text-[10px] text-text-muted">
+                  <span className="flex items-center gap-0.5 text-footnote text-text-muted">
                     <Clock size={9} className="shrink-0" />
                     {duration}
                   </span>
@@ -250,7 +280,7 @@ export function NoteCard({
                 {meeting.location && (
                   <button
                     onClick={e => { e.preventDefault(); e.stopPropagation(); openLocation(meeting.location!); }}
-                    className="flex items-center gap-0.5 text-[10px] text-accent/70 hover:text-accent transition-colors max-w-[140px]"
+                    className="flex items-center gap-0.5 text-footnote text-accent/70 hover:text-accent transition-colors max-w-[140px]"
                     title={isLocationUrl(meeting.location) ? meeting.location : `Open in Maps: ${meeting.location}`}
                   >
                     <MapPin size={9} className="shrink-0" />
@@ -258,7 +288,7 @@ export function NoteCard({
                   </button>
                 )}
                 {meeting.platform && meeting.platform !== "unknown" && (
-                  <span className="flex items-center gap-0.5 text-[10px] text-text-muted">
+                  <span className="flex items-center gap-0.5 text-footnote text-text-muted">
                     <Monitor size={9} className="shrink-0" />
                     {meeting.platform}
                   </span>
@@ -281,12 +311,47 @@ export function NoteCard({
                 <Lock size={9} className="text-text-muted/40" />
               )}
               {timeStr && (
-                <span className="text-[11px] text-text-muted tabular-nums">{timeStr}</span>
+                <span className="text-caption text-text-muted tabular-nums">{timeStr}</span>
               )}
             </div>
+            {/* Join & Record: calendar-synced meetings carry a call link the
+                UI never surfaced — open it and start recording in one click. */}
+            {meeting.meeting_url &&
+              (meeting.status === "upcoming" || meeting.status === "ready") && (
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    ipc.openUrl(meeting.meeting_url!).catch(() => {});
+                    useUIStore.getState().setPendingAutoStart(meeting.id);
+                    navigate({ to: "/meeting/$id", params: { id: meeting.id } });
+                  }}
+                  className="flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-footnote font-medium text-accent hover:bg-accent/20 transition-colors"
+                  title="Open the call link and start recording"
+                >
+                  <Video size={9} className="shrink-0" />
+                  Join & record
+                </button>
+              )}
+            {/* One-click Enhance for transcribed-but-unenhanced meetings */}
+            {meeting.note_status === "none" && meeting.status === "complete" && (
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  useUIStore.getState().setPendingAutoEnhance(true);
+                  navigate({ to: "/meeting/$id", params: { id: meeting.id } });
+                }}
+                className="flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-footnote font-medium text-accent hover:bg-accent/20 transition-colors"
+                title="Generate AI notes for this meeting now"
+              >
+                <Sparkles size={9} className="shrink-0" />
+                Enhance
+              </button>
+            )}
             {meeting.device_name && meeting.status !== "recording" && (
               <div
-                className="flex items-center gap-0.5 text-[10px] text-text-muted/40"
+                className="flex items-center gap-0.5 text-footnote text-text-muted/40"
                 title={`Recorded with: ${meeting.device_name}${meeting.system_audio_captured ? " + system audio" : ""}`}
               >
                 <Mic size={8} className="shrink-0" />
@@ -299,16 +364,22 @@ export function NoteCard({
       <ConfirmDialog
         open={showDeleteDialog}
         title="Delete meeting"
-        message="This meeting and all its notes and transcripts will be permanently deleted."
+        message="This meeting will be moved to the trash. You can restore it from Settings → Data."
         confirmLabel="Delete"
         variant="danger"
         onConfirm={async () => {
           try {
-            await ipc.deleteMeeting(meeting.id);
+            // Soft delete — the same contract as the meeting header and
+            // sidebar list. Hard delete (audio + rows gone forever) lives
+            // only behind Settings → Data → Empty trash; this card's
+            // right-click previously skipped the trash entirely.
+            await ipc.softDeleteMeeting(meeting.id);
+            toast.success("Meeting moved to trash");
             queryClient.invalidateQueries({ queryKey: ["meetings"] });
             queryClient.invalidateQueries({ queryKey: ["folderMeetings"] });
+            queryClient.invalidateQueries({ queryKey: ["folderMembershipsMap"] });
             queryClient.invalidateQueries({ queryKey: ["meetings", "folder"] });
-          } catch (e) { toast.error(String(e)); }
+          } catch (e) { toast.error(toUserMessage(e)); }
           setShowDeleteDialog(false);
         }}
         onCancel={() => setShowDeleteDialog(false)}

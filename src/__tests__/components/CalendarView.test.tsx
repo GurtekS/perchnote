@@ -210,9 +210,9 @@ describe("CalendarView", () => {
     rejectSync(new Error("offline"));
 
     await waitFor(() => {
-      expect(useToastStore.getState().toasts[0]?.message).toContain(
-        "Calendar sync failed: Error: offline",
-      );
+      const t = useToastStore.getState().toasts[0];
+      expect(t?.title).toBe("Calendar sync failed");
+      expect(t?.message).toContain("offline");
     });
     expect(screen.getByText("Calendar sync failed")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sync calendar" })).not.toBeDisabled();

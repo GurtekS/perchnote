@@ -22,8 +22,8 @@ export function MeetingStatusBadge({ status, className = "" }: MeetingStatusBadg
   return (
     <span
       title="Has notes"
-      className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${className}`}
-      style={{ background: "var(--color-accent)", opacity: 0.7 }}
+      className={`dot-glow inline-block w-1.5 h-1.5 rounded-full shrink-0 ${className}`}
+      style={{ background: "var(--color-accent)", color: "var(--color-accent)", opacity: 0.7 }}
     />
   );
 }

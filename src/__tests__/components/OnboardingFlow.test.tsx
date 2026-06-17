@@ -52,11 +52,12 @@ async function advanceToFinalStep(user: ReturnType<typeof userEvent.setup>) {
   await goForward(user);
   await goForward(user);
   await goForward(user);
+  await goForward(user);
 }
 
 async function goForward(user: ReturnType<typeof userEvent.setup>) {
   const nextActions = screen.getAllByRole("button", {
-    name: /Check audio|Skip audio setup|Review AI options|Skip AI setup|Review calendar options|Skip calendar setup|Review start steps/i,
+    name: /Check audio|Skip audio setup|Review AI options|Skip AI setup|Review calendar options|Skip calendar setup|Test your setup|Review start steps/i,
   });
   await user.click(nextActions[nextActions.length - 1]);
 }
@@ -307,6 +308,7 @@ describe("OnboardingFlow", () => {
     expect(screen.getByText(/No calendar is required/)).toBeInTheDocument();
 
     await goForward(user);
+    await goForward(user);
     await user.click(screen.getByRole("button", { name: /Start using Perchnote/i }));
 
     await waitFor(() => {
@@ -387,6 +389,7 @@ describe("OnboardingFlow", () => {
     expect(screen.getByText("ics store unavailable")).toBeInTheDocument();
 
     await goForward(user);
+    await goForward(user);
     await user.click(screen.getByRole("button", { name: /Start using Perchnote/i }));
 
     await waitFor(() => {
@@ -404,7 +407,7 @@ describe("OnboardingFlow", () => {
     expect(await screen.findByRole("button", { name: "Permission check requested" })).toBeDisabled();
 
     await goForward(user);
-    await user.type(screen.getByPlaceholderText("sk-ant-..."), "sk-ant-");
+    await user.type(screen.getByPlaceholderText("sk-ant-…"), "sk-ant-");
     await user.click(screen.getByRole("button", { name: "Use for preview" }));
 
     expect((await screen.findAllByText("key set")).length).toBeGreaterThan(0);
@@ -417,6 +420,7 @@ describe("OnboardingFlow", () => {
 
     expect(await screen.findByText("1 configured")).toBeInTheDocument();
 
+    await goForward(user);
     await goForward(user);
 
     expect(screen.getByText("permission requested")).toBeInTheDocument();
@@ -539,6 +543,9 @@ describe("OnboardingFlow", () => {
     expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
       meetingId: "permission-check",
       deviceName: null,
+      // mic-only probe: the Screen Recording gate must not block the mic
+      // permission check.
+      systemAudio: false,
     });
   });
 });

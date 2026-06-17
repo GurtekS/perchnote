@@ -12,6 +12,7 @@ interface TauriCoreMockOptions {
   microsoftConnected?: boolean;
   ollamaRunning?: boolean;
   appleAiAvailable?: boolean;
+  speechEngineAvailable?: boolean;
   commandHandlers?: Record<string, CommandHandler>;
 }
 
@@ -44,6 +45,7 @@ interface TauriCoreMockState {
   microsoftConnected: boolean;
   ollamaRunning: boolean;
   appleAiAvailable: boolean;
+  speechEngineAvailable: boolean;
   recordingMeetingId: string | null;
   isPaused: boolean;
   templates: MockTemplate[];
@@ -84,6 +86,7 @@ function createState(options: TauriCoreMockOptions = {}): TauriCoreMockState {
     microsoftConnected: options.microsoftConnected ?? false,
     ollamaRunning: options.ollamaRunning ?? false,
     appleAiAvailable: options.appleAiAvailable ?? false,
+    speechEngineAvailable: options.speechEngineAvailable ?? false,
     recordingMeetingId: null,
     isPaused: false,
     templates: [makeDefaultTemplate()],
@@ -138,6 +141,8 @@ async function defaultInvoke(command: string, args?: InvokeArgs): Promise<unknow
       return state.ollamaRunning ? ["llama3.2"] : [];
     case "is_apple_ai_available":
       return state.appleAiAvailable;
+    case "speech_engine_available":
+      return state.speechEngineAvailable;
     case "list_anthropic_models":
       return [
         {
@@ -292,6 +297,9 @@ async function defaultInvoke(command: string, args?: InvokeArgs): Promise<unknow
         system_audio_captured: false,
         note_status: "none",
       };
+
+    case "get_folder_memberships_map":
+      return {};
 
     default:
       return null;

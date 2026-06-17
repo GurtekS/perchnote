@@ -5,6 +5,7 @@ import { ChevronRight, ChevronDown, Folder as FolderIcon, Plus, MoreHorizontal, 
 import { FolderNode, Folder, ipc } from "../../lib/ipc";
 import { ConfirmDialog } from "../shared/ConfirmDialog";
 import { toast } from "../../stores/toastStore";
+import { toUserMessage } from "../../lib/errors";
 import { useThemeStore, generateFolderPalette, folderColorFromId } from "../../stores/themeStore";
 
 interface FolderTreeProps {
@@ -83,14 +84,14 @@ export function FolderTree({ tree, activeFolderId, onSelect, onMove }: FolderTre
     try {
       await ipc.renameFolder(folder.id, trimmed);
       invalidate();
-    } catch (e) { toast.error(String(e)); }
+    } catch (e) { toast.error(toUserMessage(e)); }
   };
 
   const handleDelete = (node: FolderNode) => {
     if (node.children.length > 0 || node.meeting_count > 0) {
       setDeleteTarget(node);
     } else {
-      ipc.deleteFolder(node.id).then(invalidate).catch(e => toast.error(String(e)));
+      ipc.deleteFolder(node.id).then(invalidate).catch(e => toast.error(toUserMessage(e)));
     }
   };
 
@@ -103,7 +104,7 @@ export function FolderTree({ tree, activeFolderId, onSelect, onMove }: FolderTre
         await ipc.deleteFolder(deleteTarget.id);
       }
       invalidate();
-    } catch (e) { toast.error(String(e)); }
+    } catch (e) { toast.error(toUserMessage(e)); }
     setDeleteTarget(null);
   };
 
@@ -114,7 +115,7 @@ export function FolderTree({ tree, activeFolderId, onSelect, onMove }: FolderTre
       setExpanded(prev => ({ ...prev, [parentNode.id]: true }));
       setRenamingId(f.id);
       setRenameValue("New Folder");
-    } catch (e) { toast.error(String(e)); }
+    } catch (e) { toast.error(toUserMessage(e)); }
   };
 
   const renderNode = (node: FolderNode, depth: number) => {
@@ -144,7 +145,7 @@ export function FolderTree({ tree, activeFolderId, onSelect, onMove }: FolderTre
             if (fid && fid !== node.id) { onMove(fid, node.id); }
             else if (mid) {
               try { await ipc.addMeetingToFolder(mid, node.id); invalidate(); }
-              catch (e) { toast.error(String(e)); }
+              catch (e) { toast.error(toUserMessage(e)); }
             }
           }}
         >
@@ -167,7 +168,7 @@ export function FolderTree({ tree, activeFolderId, onSelect, onMove }: FolderTre
           {isRenaming ? (
             <input
               autoFocus
-              className="flex-1 text-[13px] bg-transparent outline-none border-b border-accent min-w-0 ml-1"
+              className="flex-1 text-body-sm bg-transparent outline-none border-b border-accent min-w-0 ml-1"
               value={renameValue}
               onChange={e => setRenameValue(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") handleRenameCommit(node); if (e.key === "Escape") setRenamingId(null); }}
@@ -175,11 +176,11 @@ export function FolderTree({ tree, activeFolderId, onSelect, onMove }: FolderTre
               onClick={e => e.stopPropagation()}
             />
           ) : (
-            <span className="flex-1 text-[13px] truncate ml-1">{node.name}</span>
+            <span className="flex-1 text-body-sm truncate ml-1">{node.name}</span>
           )}
           {/* Count badge */}
           {node.meeting_count > 0 && !isRenaming && (
-            <span className="text-[10px] text-text-muted/50 tabular-nums shrink-0 ml-1">{node.meeting_count}</span>
+            <span className="text-footnote text-text-muted/50 tabular-nums shrink-0 ml-1">{node.meeting_count}</span>
           )}
           {/* Hover actions */}
           {!isRenaming && (
@@ -205,8 +206,7 @@ export function FolderTree({ tree, activeFolderId, onSelect, onMove }: FolderTre
         {/* Inline context menu */}
         {showMenu && (
           <div
-            className="ml-8 mr-2 border rounded-lg shadow-xl py-1 text-[13px] z-50"
-            style={{ background: "var(--popup-bg)", borderColor: "var(--popup-border)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" }}
+            className="glass-float ml-8 mr-2 rounded-lg py-1 text-body-sm z-50"
             onClick={e => e.stopPropagation()}
           >
             <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors"
@@ -226,7 +226,7 @@ export function FolderTree({ tree, activeFolderId, onSelect, onMove }: FolderTre
                     style={{ background: c }}
                     onClick={async () => {
                       try { await ipc.updateFolder(node.id, undefined, c, undefined); invalidate(); }
-                      catch (e) { toast.error(String(e)); }
+                      catch (e) { toast.error(toUserMessage(e)); }
                       setColorPickerId(null); setMenuOpenId(null);
                     }}>
                     {c === node.color && <Check size={9} className="text-white" />}

@@ -27,12 +27,28 @@ describe("SettingsView", () => {
   it("renders settings panels with deterministic local Tauri mocks", async () => {
     renderSettings();
 
-    expect(await screen.findByText("Default Template")).toBeInTheDocument();
+    expect(await screen.findByText("Accent Color")).toBeInTheDocument();
+    // Moved out of General (UX audit junk drawer): AI-generation settings
+    // live in AI, the default template in Templates.
+    expect(screen.queryByText("Default Template")).not.toBeInTheDocument();
+    expect(screen.queryByText("Instant recap")).not.toBeInTheDocument();
+    expect(screen.queryByText("My Tasks Only")).not.toBeInTheDocument();
+    expect(screen.queryByText("About You")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "AI" }));
 
     expect(await screen.findByText("Anthropic API")).toBeInTheDocument();
     expect(await screen.findByText("no key")).toBeInTheDocument();
+    // The Generation subsection groups the provider-independent behavior.
+    expect(screen.getByText("Generation")).toBeInTheDocument();
+    expect(screen.getByText("Instant recap")).toBeInTheDocument();
+    expect(screen.getByText("My Tasks Only")).toBeInTheDocument();
+    expect(screen.getByText("About You")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Templates" }));
+
+    expect(await screen.findByText("Default Template")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Default template" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Calendar" }));
 
@@ -137,7 +153,10 @@ describe("SettingsView", () => {
   it("uses Perchnote product copy in General settings", async () => {
     renderSettings();
 
-    expect(await screen.findByText("Perchnote v0.1.0")).toBeInTheDocument();
+    // Version comes from getVersion() at runtime (was a hardcoded v0.1.0
+    // that survived four releases — friction audit #15).
+    expect(await screen.findByText(/^Perchnote/)).toBeInTheDocument();
+    expect(screen.queryByText(/v0\.1\.0/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Meeting Assistant/i)).not.toBeInTheDocument();
   });
 
@@ -167,7 +186,7 @@ describe("SettingsView", () => {
     try {
       renderSettings();
       fireEvent.click(screen.getByRole("button", { name: "Data" }));
-      fireEvent.click(await screen.findByRole("button", { name: /Export all data/i }));
+      fireEvent.click(await screen.findByRole("button", { name: /Export JSON/i }));
 
       await waitFor(() => {
         expect(anchorClick).toHaveBeenCalledTimes(1);
@@ -180,6 +199,100 @@ describe("SettingsView", () => {
       if (originalRevokeObjectURL) Object.defineProperty(URL, "revokeObjectURL", originalRevokeObjectURL);
       else Reflect.deleteProperty(URL, "revokeObjectURL");
     }
+  });
+
+  it("writes and then verifies a .perchnote archive from the Data panel", async () => {
+    const exportHandler = vi.fn(() => ({
+      path: "/Users/mock/Desktop/Perchnote-backup-2026-06-09.perchnote",
+      files: 4,
+      bytes: 5163,
+    }));
+    const verifyHandler = vi.fn(() => ({ ok: true, checked: 4, problems: [] }));
+    resetTauriCoreMock({
+      commandHandlers: {
+        export_backup_archive: exportHandler,
+        verify_backup_archive: verifyHandler,
+      },
+    });
+
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Data" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Full backup/i }));
+
+    await waitFor(() => {
+      expect(exportHandler).toHaveBeenCalledTimes(1);
+      expect(verifyHandler).toHaveBeenCalledTimes(1);
+    });
+    // The verify call must target the file the export just wrote.
+    expect(verifyHandler.mock.calls[0][0]).toMatchObject({
+      path: "/Users/mock/Desktop/Perchnote-backup-2026-06-09.perchnote",
+    });
+    // Busy state resolves back to the idle label.
+    expect(await screen.findByRole("button", { name: /Full backup/i })).toBeEnabled();
+  });
+
+  it("lists archives and stages a restore behind an explicit confirm", async () => {
+    const listHandler = vi.fn(() => [
+      { path: "/Users/mock/Desktop/Perchnote-backup-2026-06-09.perchnote", bytes: 2048, modified: "2026-06-09T22:00:00Z" },
+    ]);
+    const restoreHandler = vi.fn(() => 4);
+    resetTauriCoreMock({
+      commandHandlers: {
+        list_backup_archives: listHandler,
+        restore_backup_archive: restoreHandler,
+        restart_app: vi.fn(),
+      },
+    });
+
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Data" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Restore from backup/i }));
+
+    // Picking an archive opens the danger confirm; nothing restores yet.
+    fireEvent.click(await screen.findByRole("button", { name: /Perchnote-backup-2026-06-09/ }));
+    expect(restoreHandler).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Restore & Restart/i }));
+    await waitFor(() => {
+      expect(restoreHandler).toHaveBeenCalledTimes(1);
+    });
+    expect(restoreHandler.mock.calls[0][0]).toMatchObject({
+      path: "/Users/mock/Desktop/Perchnote-backup-2026-06-09.perchnote",
+    });
+  });
+
+  it("gates the Apple Speech engine option on availability (plan v9 #12)", async () => {
+    renderSettings({ initialSection: "audio" });
+
+    // Default host: SpeechTranscriber unavailable → apple option disabled,
+    // whisper selected.
+    const picker = await screen.findByRole("combobox", { name: "Transcription engine" });
+    expect(picker).toHaveValue("whisper");
+    expect(
+      screen.getByRole("option", { name: /Apple Speech \(macOS 26\+, beta\)/ }),
+    ).toBeDisabled();
+  });
+
+  it("persists the Apple Speech engine choice when the stack is available", async () => {
+    resetTauriCoreMock({ speechEngineAvailable: true });
+    renderSettings({ initialSection: "audio" });
+
+    const picker = await screen.findByRole("combobox", { name: "Transcription engine" });
+    await waitFor(() => {
+      expect(
+        screen.getByRole("option", { name: /Apple Speech \(macOS 26\+, beta\)/ }),
+      ).not.toBeDisabled();
+    });
+
+    fireEvent.change(picker, { target: { value: "apple" } });
+
+    await waitFor(() => {
+      expect(picker).toHaveValue("apple");
+    });
+    // The version-scope caveat is stated right next to the picker.
+    expect(
+      screen.getByText(/Applies to imports and re-transcription in this version/),
+    ).toBeInTheDocument();
   });
 
   it("accepts only known settings sections for setup repair routing", () => {

@@ -63,15 +63,15 @@ describe("PostRecordingScreen", () => {
     expect(screen.getByText("None")).toBeInTheDocument();
   });
 
-  it("calls onEnhance when Enhance Notes clicked", () => {
+  it("calls onEnhance when Enhance notes clicked", () => {
     render(withQuery(<PostRecordingScreen {...defaultProps} />));
-    fireEvent.click(screen.getByText(/Enhance Notes/));
+    fireEvent.click(screen.getByText(/Enhance notes/));
     expect(defaultProps.onEnhance).toHaveBeenCalledOnce();
   });
 
-  it("calls onReviewTranscript when Review Transcript clicked", () => {
+  it("calls onReviewTranscript when Review transcript clicked", () => {
     render(withQuery(<PostRecordingScreen {...defaultProps} />));
-    fireEvent.click(screen.getByText("Review Transcript"));
+    fireEvent.click(screen.getByText("Review transcript"));
     expect(defaultProps.onReviewTranscript).toHaveBeenCalledOnce();
   });
 
@@ -90,5 +90,53 @@ describe("PostRecordingScreen", () => {
   it("shows < 1 min for sub-60s duration", () => {
     render(withQuery(<PostRecordingScreen {...defaultProps} duration={30} />));
     expect(screen.getByText(/< 1 min/)).toBeInTheDocument();
+  });
+
+  // --- Auto-enhance awareness ---
+
+  it("shows a generating status instead of Enhance when instant recap is expected", () => {
+    render(withQuery(<PostRecordingScreen {...defaultProps} autoEnhanceExpected />));
+    expect(screen.getByText(/Generating notes/)).toBeInTheDocument();
+    expect(screen.queryByText(/Enhance notes/)).not.toBeInTheDocument();
+  });
+
+  it("shows the generating status while an enhance run is in flight", () => {
+    render(withQuery(<PostRecordingScreen {...defaultProps} isEnhancing />));
+    expect(screen.getByText(/Generating notes/)).toBeInTheDocument();
+    expect(screen.queryByText(/Enhance notes/)).not.toBeInTheDocument();
+  });
+
+  it("does not auto-dismiss while notes are generating", () => {
+    render(withQuery(<PostRecordingScreen {...defaultProps} autoEnhanceExpected />));
+    act(() => vi.advanceTimersByTime(20000));
+    expect(defaultProps.onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("shows 'Notes ready' and View notes once enhanced — never a re-enhance button", () => {
+    render(withQuery(<PostRecordingScreen {...defaultProps} isEnhanced autoEnhanceExpected />));
+    expect(screen.getByText("Notes ready")).toBeInTheDocument();
+    expect(screen.getByText("View notes")).toBeInTheDocument();
+    expect(screen.queryByText(/Enhance notes/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Generating notes/)).not.toBeInTheDocument();
+  });
+
+  it("View notes dismisses to the enhanced editor", () => {
+    render(withQuery(<PostRecordingScreen {...defaultProps} isEnhanced />));
+    fireEvent.click(screen.getByText("View notes"));
+    expect(defaultProps.onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to a manual Generate button if instant recap never finishes", () => {
+    render(withQuery(<PostRecordingScreen {...defaultProps} autoEnhanceExpected />));
+    expect(screen.getByText(/Generating notes/)).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(45000));
+    expect(screen.queryByText(/Generating notes/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Generate notes/)).toBeInTheDocument();
+  });
+
+  it("keeps the manual Enhance hero when auto-enhance is off", () => {
+    render(withQuery(<PostRecordingScreen {...defaultProps} autoEnhanceExpected={false} />));
+    expect(screen.getByText(/Enhance notes/)).toBeInTheDocument();
+    expect(screen.queryByText(/Generating notes/)).not.toBeInTheDocument();
   });
 });

@@ -3,8 +3,14 @@ export interface GeneratedNotes {
   title: string;
   summary: string;
   sections: { heading: string; bullets: string[] }[];
-  action_items: { task: string; assignee: string | null; deadline: string | null }[];
+  action_items: { task: string; assignee: string | null; deadline: string | null; source_start_ms?: number | null }[];
   tags: string[];
+  /** Validated per-bullet transcript provenance (plan v3 rank 7). */
+  bullet_anchors?: { section_index: number; bullet_index: number; source_start_ms: number }[];
+  /** Enhance receipt (plan v10 #2) — stamped by the backend after
+   *  generation: which provider/model ran and the transcript hash the
+   *  prompt was built from. Handed back at persist time. */
+  receipt?: { provider: string; model: string; transcript_sha: string | null } | null;
 }
 
 /** A minimally-typed TipTap doc, just enough to assert on in tests. */
@@ -25,8 +31,15 @@ export function generatedNotesToTiptap(notes: GeneratedNotes): TipTapDoc {
     });
   }
 
-  for (const section of notes.sections ?? []) {
-    if (!section.heading) continue;
+  // Per-bullet provenance: anchored bullets end with a "⏱ m:ss" mark —
+  // the same plain-text shape the ⌘-click replay handler already seeks on.
+  const anchorMs = new Map<string, number>();
+  for (const a of notes.bullet_anchors ?? []) {
+    anchorMs.set(`${a.section_index}:${a.bullet_index}`, a.source_start_ms);
+  }
+
+  (notes.sections ?? []).forEach((section, si) => {
+    if (!section.heading) return;
     content.push({
       type: "heading",
       attrs: { level: 2 },
@@ -35,16 +48,25 @@ export function generatedNotesToTiptap(notes: GeneratedNotes): TipTapDoc {
     if (section.bullets?.length) {
       content.push({
         type: "bulletList",
-        content: section.bullets.map((b) => ({
-          type: "listItem",
-          content: [{
-            type: "paragraph",
-            content: [{ type: "text", text: b }],
-          }],
-        })),
+        content: section.bullets.map((b, bi) => {
+          const ms = anchorMs.get(`${si}:${bi}`);
+          const text =
+            ms != null
+              ? `${b}  ⏱ ${Math.floor(ms / 60000)}:${(Math.floor(ms / 1000) % 60)
+                  .toString()
+                  .padStart(2, "0")}`
+              : b;
+          return {
+            type: "listItem",
+            content: [{
+              type: "paragraph",
+              content: [{ type: "text", text }],
+            }],
+          };
+        }),
       });
     }
-  }
+  });
 
   if (notes.action_items?.length) {
     content.push({
@@ -60,6 +82,7 @@ export function generatedNotesToTiptap(notes: GeneratedNotes): TipTapDoc {
           assignee: item.assignee ?? null,
           deadline: item.deadline ?? null,
           done:     false,
+          source_start_ms: item.source_start_ms ?? null,
         },
       });
     }

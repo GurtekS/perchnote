@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   X,
   Search,
@@ -11,14 +12,17 @@ import {
   SkipForward,
   Users,
   Pencil,
-  RefreshCw,
-  Loader2,
   Mic,
+  Star,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { ipc, Transcript } from "../../lib/ipc";
 import { toast } from "../../stores/toastStore";
+import { toUserMessage } from "../../lib/errors";
 import { IdentifySpeakersPanel } from "./IdentifySpeakersPanel";
 
 interface TranscriptSegment {
@@ -27,6 +31,8 @@ interface TranscriptSegment {
   end_ms: number;
   speaker: string | null;
   speaker_confidence?: number;
+  /** ⌘D while recording, or the star toggle here. */
+  highlighted?: boolean;
 }
 
 interface TranscriptDrawerProps {
@@ -49,23 +55,9 @@ const SPEAKER_COLORS = [
   "bg-cyan-400",
 ];
 
-const SPEAKER_HEX_COLORS = [
-  "#60a5fa",
-  "#34d399",
-  "#fbbf24",
-  "#a78bfa",
-  "#f472b6",
-  "#22d3ee",
-];
-
 function getSpeakerBgColor(speaker: string): string {
   const num = parseInt(speaker.replace(/\D/g, ""), 10) || 0;
   return SPEAKER_COLORS[(num - 1) % SPEAKER_COLORS.length];
-}
-
-function getSpeakerHexColor(speaker: string): string {
-  const num = parseInt(speaker.replace(/\D/g, ""), 10) || 0;
-  return SPEAKER_HEX_COLORS[(num - 1) % SPEAKER_HEX_COLORS.length];
 }
 
 export function TranscriptDrawer({
@@ -81,11 +73,10 @@ export function TranscriptDrawer({
   const [searchQuery, setSearchQuery] = useState("");
   const [copied, setCopied] = useState(false);
 
-  // Speaker editing
-  const [editingSpeaker, setEditingSpeaker] = useState<string | null>(null);
-  const [editSpeakerName, setEditSpeakerName] = useState("");
-  const editInputRef = useRef<HTMLInputElement>(null);
-  const [isReanalyzing, setIsReanalyzing] = useState(false);
+  // Speaker the Speakers tab should focus on open — set by the inline
+  // speaker pills, which route renames to the tab's identify panel instead
+  // of a separate bespoke editor (UX audit: three rename surfaces → one).
+  const [speakerFocus, setSpeakerFocus] = useState<string | null>(null);
 
   // Audio player state
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -97,7 +88,6 @@ export function TranscriptDrawer({
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
 
   // Active segment ref for auto-scroll
-  const activeSegRef = useRef<HTMLDivElement>(null);
   // Live transcript bottom ref
   const liveBottomRef = useRef<HTMLDivElement>(null);
 
@@ -127,9 +117,38 @@ export function TranscriptDrawer({
     [speakerLabelMap]
   );
 
-  // Reset search when switching meetings
+  // Seek requests from note source chips (plan rank 2). Buffered so a chip
+  // click that opens the drawer still seeks once the audio element exists.
+  const pendingSeekRef = useRef<number | null>(null);
+  const applyPendingSeek = useCallback(() => {
+    const ms = pendingSeekRef.current;
+    const a = audioRef.current;
+    if (ms == null || !a) return;
+    pendingSeekRef.current = null;
+    a.currentTime = ms / 1000;
+    a.play().catch(() => {});
+  }, []);
+  useEffect(() => {
+    const onSeek = (e: Event) => {
+      const ms = (e as CustomEvent<{ ms: number }>).detail?.ms;
+      if (typeof ms !== "number") return;
+      pendingSeekRef.current = ms;
+      applyPendingSeek();
+    };
+    window.addEventListener("seek-audio", onSeek);
+    return () => window.removeEventListener("seek-audio", onSeek);
+  }, [applyPendingSeek]);
+  useEffect(() => {
+    if (isOpen && audioSrc) {
+      const t = setTimeout(applyPendingSeek, 350);
+      return () => clearTimeout(t);
+    }
+  }, [isOpen, audioSrc, applyPendingSeek]);
+
+  // Reset filters when switching meetings
   useEffect(() => {
     setSearchQuery("");
+    setShowOnlyHighlights(false);
   }, [meetingId]);
 
   // Load audio
@@ -153,14 +172,6 @@ export function TranscriptDrawer({
     }
   }, [isRecording, liveSegments.length]);
 
-  // Focus speaker edit input when editing starts
-  useEffect(() => {
-    if (editingSpeaker && editInputRef.current) {
-      editInputRef.current.focus();
-      editInputRef.current.select();
-    }
-  }, [editingSpeaker]);
-
   const storedSegments = useMemo(() => parseSegments(transcript), [transcript]);
 
   // When recording, use live segments; otherwise use stored
@@ -173,12 +184,190 @@ export function TranscriptDrawer({
     return lastEnd < 3600000;
   }, [segments]);
 
-  // Filter by search
+  // Topic trackers (ported from the orphaned TranscriptView — plan v7 #23):
+  // user-defined terms counted across the transcript; a chip click reuses
+  // the search filter. Pure local string matching.
+  const { data: trackerTermsRaw = "" } = useQuery({
+    queryKey: ["setting", "topic_trackers"],
+    queryFn: () => ipc.getSetting("topic_trackers").then((v) => v ?? ""),
+    staleTime: 60_000,
+  });
+  const trackerHits = useMemo(() => {
+    const terms = trackerTermsRaw
+      .split(/[,\n]/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 2);
+    if (terms.length === 0 || segments.length === 0) return [];
+    return terms
+      .map((term) => {
+        const q = term.toLowerCase();
+        const count = segments.reduce(
+          (acc, seg) => acc + (seg.text.toLowerCase().includes(q) ? 1 : 0),
+          0,
+        );
+        return { term, count };
+      })
+      .filter((t) => t.count > 0);
+  }, [trackerTermsRaw, segments]);
+
+  // ⌘D flagged moments (also ported): filter to them, toggle per segment.
+  const [showOnlyHighlights, setShowOnlyHighlights] = useState(false);
+  const highlightCount = useMemo(
+    () => segments.filter((s) => s.highlighted).length,
+    [segments],
+  );
+  // Un-starring the last flag while the lens is on stranded a blank
+  // transcript with the toggle gone (QA audit finding 3) — force it off.
+  useEffect(() => {
+    if (showOnlyHighlights && highlightCount === 0) setShowOnlyHighlights(false);
+  }, [showOnlyHighlights, highlightCount]);
+  const toggleHighlight = useCallback(
+    async (index: number) => {
+      try {
+        await ipc.toggleSegmentHighlight(meetingId, index);
+        queryClient.invalidateQueries({ queryKey: ["transcript", meetingId] });
+      } catch (e) {
+        toast.error(toUserMessage(e));
+      }
+    },
+    [meetingId, queryClient],
+  );
+
+  // Transcript correction (plan v9 #8): inline segment edit + replace-all.
+  // One misheard name poisons search, embeddings, and every AI pass — this
+  // is where it gets fixed.
+  const [editing, setEditing] = useState<{ idx: number; draft: string } | null>(null);
+  const [replaceDraft, setReplaceDraft] = useState("");
+  // Durable affordance for sticky fixes (deep review P2: the only way to
+  // make a correction permanent was an 8-second toast).
+  const [alwaysFix, setAlwaysFix] = useState(false);
+  useEffect(() => {
+    setEditing(null);
+    setReplaceDraft("");
+  }, [meetingId]);
+  // Edits are addressed by segment index, and the accuracy pass swaps the
+  // whole segment list in the background minutes after stop — the index
+  // under an open editor then names a different utterance. Abort the
+  // in-flight edit rather than save onto the wrong segment.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void listen<{ meeting_id: string }>("transcript-upgraded", (event) => {
+      if (event.payload.meeting_id !== meetingId) return;
+      setEditing((cur) => {
+        if (cur) {
+          toast.info(
+            "The transcript was upgraded by the accuracy pass — please redo that edit",
+            "Edit not saved",
+          );
+        }
+        return null;
+      });
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [meetingId]);
+  const saveEdit = useCallback(async () => {
+    if (!editing || !editing.draft.trim()) return;
+    try {
+      await ipc.updateSegmentText(meetingId, editing.idx, editing.draft.trim());
+      queryClient.invalidateQueries({ queryKey: ["transcript", meetingId] });
+      setEditing(null);
+    } catch (e) {
+      toast.error(toUserMessage(e), "Couldn't save the edit");
+    }
+  }, [editing, meetingId, queryClient]);
+  const replaceAll = useCallback(async () => {
+    const find = searchQuery.trim();
+    const replace = replaceDraft.trim();
+    if (!find || !replace) return;
+    try {
+      const n = await ipc.replaceInTranscript(meetingId, find, replace);
+      queryClient.invalidateQueries({ queryKey: ["transcript", meetingId] });
+      if (n > 0 && alwaysFix) {
+        try {
+          const { addCorrectionRule } = await import("../../lib/correctionRules");
+          await addCorrectionRule(find, replace);
+          queryClient.invalidateQueries({ queryKey: ["correction-rules"] });
+          toast.success(`Replaced in ${n} segment${n === 1 ? "" : "s"} — “${find}” → “${replace}” will be fixed in every future transcript`);
+          setReplaceDraft("");
+          setAlwaysFix(false);
+          return;
+        } catch (e) {
+          toast.error(toUserMessage(e), "Replaced, but the rule couldn't be saved");
+          return;
+        }
+      }
+      if (n > 0) {
+        // Sticky rules (plan v10 #5): the same misheard name returns every
+        // meeting — one click makes this fix permanent for future ASR.
+        toast.action(
+          `Replaced in ${n} segment${n === 1 ? "" : "s"}`,
+          "Always make this fix",
+          async () => {
+            try {
+              const { addCorrectionRule } = await import("../../lib/correctionRules");
+              await addCorrectionRule(find, replace);
+              // An open Audio Settings panel shows the rule list live.
+              queryClient.invalidateQueries({ queryKey: ["correction-rules"] });
+              toast.success(
+                `"${find}" → "${replace}" will be fixed in every future transcript (manage in Audio settings)`,
+              );
+            } catch (e) {
+              toast.error(toUserMessage(e), "Couldn't save the rule");
+            }
+          },
+          "Replaced",
+        );
+        setReplaceDraft("");
+      } else {
+        toast.info(
+          `No matches for “${find}” — check spelling and punctuation; matching ignores letter case.`,
+        );
+      }
+    } catch (e) {
+      toast.error(toUserMessage(e), "Replace failed");
+    }
+  }, [searchQuery, replaceDraft, meetingId, queryClient]);
+
+  // Search has two modes (plan v9 #11): find-in-context (default — every
+  // segment stays visible, matches highlighted, n/N stepping) and the old
+  // filter mode (hide non-matching). Filtering loses the conversation
+  // around a hit; finding keeps it.
+  const [filterMode, setFilterMode] = useState(false);
+  const [activeMatch, setActiveMatch] = useState(0);
+
+  // Filter by flagged-only and (in filter mode) search. Items carry their
+  // index in the FULL segment array — the highlight toggle is keyed on it.
   const filteredSegments = useMemo(() => {
-    if (!searchQuery.trim()) return segments;
-    const q = searchQuery.toLowerCase();
-    return segments.filter((s) => s.text.toLowerCase().includes(q));
-  }, [segments, searchQuery]);
+    let list = segments.map((seg, idx) => ({ seg, idx }));
+    if (showOnlyHighlights) list = list.filter(({ seg }) => seg.highlighted);
+    if (searchQuery.trim() && filterMode) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(({ seg }) => seg.text.toLowerCase().includes(q));
+    }
+    return list;
+  }, [segments, searchQuery, showOnlyHighlights, filterMode]);
+
+  // Display-list indexes of matching rows — the find-mode step targets.
+  const matchIndexes = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    const out: number[] = [];
+    filteredSegments.forEach(({ seg }, i) => {
+      if (seg.text.toLowerCase().includes(q)) out.push(i);
+    });
+    return out;
+  }, [filteredSegments, searchQuery]);
+
+  useEffect(() => {
+    setActiveMatch(0);
+  }, [searchQuery, filterMode, meetingId]);
 
   // Active segment tracking (for playback highlight)
   const activeSegmentStart = useMemo(() => {
@@ -192,33 +381,48 @@ export function TranscriptDrawer({
     return last;
   }, [currentTime, segments, isPlaying]);
 
-  // Auto-scroll to active segment
+  // Virtualized rows (plan v7 lifetime 17): a 2h meeting is 1000-2500
+  // segments × ~10 DOM nodes each; rendering them all made every playback
+  // tick and search keystroke re-render 15-25k nodes. Only ~20 visible
+  // rows exist at a time now.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: filteredSegments.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 44,
+    overscan: 12,
+  });
+
+  // Auto-scroll playback to the active segment — the row may not be
+  // mounted, so this goes through the virtualizer, not a DOM ref.
   useEffect(() => {
-    if (isPlaying && activeSegRef.current) {
-      activeSegRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
+    if (!isPlaying || activeSegmentStart < 0) return;
+    const idx = filteredSegments.findIndex(({ seg }) => seg.start_ms === activeSegmentStart);
+    if (idx >= 0) rowVirtualizer.scrollToIndex(idx, { align: "auto" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSegmentStart, isPlaying]);
 
-  // Unique speakers with confidence stats for speakers tab
-  const uniqueSpeakers = useMemo(() => {
-    const countMap = new Map<string, number>();
-    const confMap = new Map<string, number[]>();
-    for (const seg of segments) {
-      if (seg.speaker) {
-        countMap.set(seg.speaker, (countMap.get(seg.speaker) || 0) + 1);
-        if (seg.speaker_confidence !== undefined) {
-          const arr = confMap.get(seg.speaker) || [];
-          arr.push(seg.speaker_confidence);
-          confMap.set(seg.speaker, arr);
-        }
-      }
-    }
-    return Array.from(countMap.entries()).map(([speaker, count]) => {
-      const confs = confMap.get(speaker) || [];
-      const avgConf = confs.length > 0 ? confs.reduce((a, b) => a + b, 0) / confs.length : null;
-      return { speaker, count, avgConf };
-    });
-  }, [segments]);
+  // Find-mode stepping: Enter/▼ next, Shift+Enter/▲ previous, wrapping.
+  const stepMatch = useCallback(
+    (dir: 1 | -1) => {
+      if (matchIndexes.length === 0) return;
+      setActiveMatch((m) => {
+        const next = (m + dir + matchIndexes.length) % matchIndexes.length;
+        rowVirtualizer.scrollToIndex(matchIndexes[next], { align: "center" });
+        return next;
+      });
+    },
+    [matchIndexes, rowVirtualizer],
+  );
+
+  // Bring the current match into view when a find begins or matches move
+  // (typing narrows the set). Playback auto-scroll wins while playing.
+  useEffect(() => {
+    if (filterMode || isPlaying || matchIndexes.length === 0) return;
+    const idx = matchIndexes[Math.min(activeMatch, matchIndexes.length - 1)];
+    rowVirtualizer.scrollToIndex(idx, { align: "center" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchIndexes, activeMatch, filterMode]);
 
   const handleCopy = async () => {
     const text = segments
@@ -245,7 +449,7 @@ export function TranscriptDrawer({
         await audio.play();
       }
     } catch (e) {
-      toast.error("Playback failed: " + String(e));
+      toast.error(toUserMessage(e), "Playback failed");
       setIsPlaying(false);
     }
   };
@@ -281,39 +485,16 @@ export function TranscriptDrawer({
       try {
         await audio.play();
       } catch (e) {
-        toast.error("Playback failed: " + String(e));
+        toast.error(toUserMessage(e), "Playback failed");
       }
     }
   };
 
-  // Re-analyze speakers
-  const handleReanalyze = async () => {
-    setIsReanalyzing(true);
-    try {
-      await ipc.rediarizeTranscript(meetingId);
-      queryClient.invalidateQueries({ queryKey: ["transcript", meetingId] });
-      toast.success("Speaker analysis updated");
-    } catch (e) {
-      toast.error("Re-analysis failed: " + String(e));
-    } finally {
-      setIsReanalyzing(false);
-    }
-  };
-
-  // Speaker label editing
-  const handleEditSpeaker = (speakerKey: string) => {
-    setEditingSpeaker(speakerKey);
-    setEditSpeakerName(getDisplayName(speakerKey));
-  };
-
-  const handleSaveSpeakerName = async (speakerKey: string) => {
-    const name = editSpeakerName.trim();
-    setEditingSpeaker(null);
-    if (name && name !== getDisplayName(speakerKey)) {
-      await ipc.upsertSpeakerLabel(meetingId, speakerKey, name);
-      queryClient.invalidateQueries({ queryKey: ["speakerLabels", meetingId] });
-      toast.success("Speaker name updated");
-    }
+  // Open the Speakers tab landed on one speaker's rename field — the
+  // single identification/rename surface (re-detect lives there too).
+  const openSpeakersTab = (speaker: string | null) => {
+    setSpeakerFocus(speaker);
+    setDrawerTab("speakers");
   };
 
   if (!isOpen) return null;
@@ -321,7 +502,7 @@ export function TranscriptDrawer({
   const isLive = isRecording && liveSegments.length > 0;
 
   return (
-    <aside className="drawer-enter flex h-full w-[min(400px,100%)] min-w-[320px] shrink-0 flex-col border-l border-border bg-bg-primary" aria-label="Transcript drawer">
+    <aside data-pane="drawer" className="drawer-enter flex h-full w-[min(400px,100%)] min-w-[320px] shrink-0 flex-col border-l border-border bg-bg-primary" aria-label="Transcript drawer">
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2.5 sm:px-4">
         {/* Tabs */}
@@ -339,7 +520,7 @@ export function TranscriptDrawer({
           </button>
           <button
             type="button"
-            onClick={() => setDrawerTab("speakers")}
+            onClick={() => openSpeakersTab(null)}
             className={drawerTab === "speakers" ? "active" : ""}
             aria-pressed={drawerTab === "speakers"}
           >
@@ -375,14 +556,6 @@ export function TranscriptDrawer({
       {/* ── Transcript Tab ── */}
       {drawerTab === "transcript" && (
         <>
-          {/* Identify speakers collapsible */}
-          <details className="px-4 py-2 border-b border-border" open={false}>
-            <summary className="text-xs text-text-muted cursor-pointer select-none">Identify speakers</summary>
-            <div className="pt-2">
-              <IdentifySpeakersPanel meetingId={meetingId} />
-            </div>
-          </details>
-
           {/* Search (only for stored transcript) */}
           {!isLive && (
             <div className="px-4 py-2 border-b border-border shrink-0">
@@ -394,9 +567,37 @@ export function TranscriptDrawer({
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search transcript..."
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !filterMode) {
+                      e.preventDefault();
+                      stepMatch(e.shiftKey ? -1 : 1);
+                    }
+                  }}
+                  placeholder="Find in transcript…"
                   className="bg-transparent text-xs text-text-primary focus:outline-none flex-1 placeholder:text-text-muted"
                 />
+                {searchQuery && !filterMode && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => stepMatch(-1)}
+                      disabled={matchIndexes.length === 0}
+                      className="text-text-muted hover:text-text-primary disabled:opacity-40"
+                      aria-label="Previous match"
+                    >
+                      <ChevronUp size={11} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => stepMatch(1)}
+                      disabled={matchIndexes.length === 0}
+                      className="text-text-muted hover:text-text-primary disabled:opacity-40"
+                      aria-label="Next match"
+                    >
+                      <ChevronDown size={11} />
+                    </button>
+                  </>
+                )}
                 {searchQuery && (
                   <button
                     type="button"
@@ -409,8 +610,105 @@ export function TranscriptDrawer({
                 )}
               </div>
               {searchQuery && (
-                <div className="text-[10px] text-text-muted mt-1">
-                  {filteredSegments.length} result{filteredSegments.length !== 1 ? "s" : ""}
+                <div className="mt-1 flex items-center gap-2 text-footnote text-text-muted">
+                  <span data-testid="match-count">
+                    {filterMode
+                      ? `${filteredSegments.length} result${filteredSegments.length !== 1 ? "s" : ""}`
+                      : matchIndexes.length === 0
+                        ? "No matches"
+                        : `${Math.min(activeMatch + 1, matchIndexes.length)} of ${matchIndexes.length}`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setFilterMode((f) => !f)}
+                    aria-pressed={filterMode}
+                    title={filterMode ? "Show every segment, step between matches" : "Hide segments that don't match"}
+                    className={`rounded-full border px-2 py-0.5 transition-colors ${
+                      filterMode
+                        ? "border-accent/40 bg-accent/10 text-accent"
+                        : "border-border text-text-muted hover:text-text-secondary"
+                    }`}
+                  >
+                    Filter
+                  </button>
+                </div>
+              )}
+              {/* Replace-all rides the find (plan v9 #8): the search query
+                  is the find term; one click fixes a misheard name
+                  everywhere. */}
+              {searchQuery.trim() && matchIndexes.length > 0 && !filterMode && (
+                <>
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={replaceDraft}
+                    onChange={(e) => setReplaceDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && replaceDraft.trim()) {
+                        e.preventDefault();
+                        replaceAll();
+                      }
+                    }}
+                    placeholder="Replace with…"
+                    aria-label="Replacement text"
+                    className="flex-1 rounded-lg bg-bg-tertiary px-2.5 py-1 text-xs text-text-primary focus:outline-none placeholder:text-text-muted"
+                  />
+                  <button
+                    type="button"
+                    onClick={replaceAll}
+                    disabled={!replaceDraft.trim()}
+                    className="rounded-lg border border-border px-2 py-1 text-footnote text-text-secondary hover:text-text-primary hover:bg-bg-hover disabled:opacity-40"
+                  >
+                    Replace all
+                  </button>
+                </div>
+                <label className="mt-1 flex w-fit cursor-pointer items-center gap-1.5 text-footnote text-text-muted">
+                  <input
+                    type="checkbox"
+                    checked={alwaysFix}
+                    onChange={(e) => setAlwaysFix(e.target.checked)}
+                    className="h-3 w-3 accent-[var(--accent)]"
+                  />
+                  Always make this fix in future transcripts
+                </label>
+                </>
+              )}
+              {/* Topic trackers + flagged-moments lens */}
+              {(trackerHits.length > 0 || highlightCount > 0) && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  {trackerHits.map(({ term, count }) => {
+                    const active = searchQuery.toLowerCase() === term.toLowerCase();
+                    return (
+                      <button
+                        key={term}
+                        type="button"
+                        onClick={() => setSearchQuery(active ? "" : term)}
+                        aria-pressed={active}
+                        className={`rounded-full border px-2 py-0.5 text-footnote transition-colors ${
+                          active
+                            ? "border-accent/40 bg-accent/10 text-accent"
+                            : "border-border text-text-muted hover:text-text-secondary"
+                        }`}
+                      >
+                        {term} · {count}
+                      </button>
+                    );
+                  })}
+                  {highlightCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowOnlyHighlights((v) => !v)}
+                      aria-pressed={showOnlyHighlights}
+                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-footnote transition-colors ${
+                        showOnlyHighlights
+                          ? "border-amber-500/40 bg-amber-500/10 text-amber-500"
+                          : "border-border text-text-muted hover:text-text-secondary"
+                      }`}
+                    >
+                      <Star size={9} fill={showOnlyHighlights ? "currentColor" : "none"} />
+                      Flagged · {highlightCount}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -420,49 +718,75 @@ export function TranscriptDrawer({
           {isLive && (
             <div className="px-4 py-1.5 border-b border-border bg-recording/5 shrink-0 flex items-center gap-1.5">
               <span className="flex h-1.5 w-1.5 rounded-full bg-recording animate-pulse" />
-              <span className="text-[11px] font-medium text-recording">Live</span>
-              <span className="text-[11px] text-text-muted ml-1">{liveSegments.length} segment{liveSegments.length !== 1 ? "s" : ""}</span>
+              <span className="text-caption font-medium text-recording">Live</span>
+              <span className="text-caption text-text-muted ml-1">{liveSegments.length} segment{liveSegments.length !== 1 ? "s" : ""}</span>
             </div>
           )}
 
-          {/* Transcript content */}
-          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-0.5">
+          {/* Transcript content — aria-live so screen readers announce new
+              segments as they stream in during a recording */}
+          <div
+            ref={scrollRef}
+            className="flex-1 overflow-y-auto px-4 py-3"
+            aria-live={isLive ? "polite" : "off"}
+            aria-atomic="false"
+          >
             {segments.length === 0 ? (
               <div className="empty-state h-full px-4 py-12">
                 <div className="empty-state-icon">
                   <Mic size={24} />
                 </div>
                 <p className="text-sm font-medium">
-                  {isRecording ? "Listening..." : meetingStatus === "complete" ? "No transcript" : "No transcript yet"}
+                  {isRecording ? "Listening…" : meetingStatus === "complete" ? "No transcript" : "No transcript yet"}
                 </p>
                 <p className="text-xs text-center max-w-[200px] leading-relaxed">
                   {isRecording
                     ? "Transcript will appear here as you speak."
+                    : meetingStatus === "transcribing"
+                    ? "Transcribing… this can take a few minutes for long recordings."
                     : meetingStatus === "complete"
                     ? "No transcript was captured for this meeting."
                     : "Record this meeting to generate a transcript."}
                 </p>
               </div>
             ) : (
-              filteredSegments.map((seg, i) => {
-                const prevSpeaker = i > 0 ? filteredSegments[i - 1].speaker : null;
+              <div
+                style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}
+              >
+              {rowVirtualizer.getVirtualItems().map((vi) => {
+                const { seg, idx } = filteredSegments[vi.index];
+                const prevSpeaker = vi.index > 0 ? filteredSegments[vi.index - 1].seg.speaker : null;
                 const showSpeaker = seg.speaker !== prevSpeaker;
                 const isActive = !isLive && seg.start_ms === activeSegmentStart;
+                const isFindTarget =
+                  !filterMode &&
+                  matchIndexes.length > 0 &&
+                  matchIndexes[Math.min(activeMatch, matchIndexes.length - 1)] === vi.index;
 
                 return (
                   <div
-                    key={i}
-                    ref={isActive ? activeSegRef : undefined}
-                    className={showSpeaker ? "pt-3" : ""}
+                    key={vi.key}
+                    data-index={vi.index}
+                    ref={rowVirtualizer.measureElement}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${vi.start}px)`,
+                    }}
+                    className={`${showSpeaker ? "pt-3" : ""} pb-0.5`}
                   >
                     {showSpeaker && seg.speaker && (
                       <div className="flex items-center gap-2 mb-1">
-                        {/* Speaker pill — click to edit */}
+                        {/* Speaker pill — click opens the Speakers tab on
+                            this speaker's rename field (one rename surface,
+                            not a bespoke inline editor). */}
                         <button
                           type="button"
-                          onClick={() => handleEditSpeaker(seg.speaker!)}
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium text-white ${getSpeakerBgColor(seg.speaker)} hover:opacity-80 transition-opacity`}
-                          title="Click to rename speaker"
+                          onClick={() => openSpeakersTab(seg.speaker!)}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-caption font-medium text-white ${getSpeakerBgColor(seg.speaker)} hover:opacity-80 transition-opacity`}
+                          title="Rename in the Speakers tab"
                           aria-label={`Rename speaker ${getDisplayName(seg.speaker)}`}
                         >
                           {getDisplayName(seg.speaker)}
@@ -471,7 +795,7 @@ export function TranscriptDrawer({
                         <button
                           type="button"
                           onClick={() => seekToTimestamp(seg.start_ms)}
-                          className="text-[10px] text-text-muted hover:text-accent transition-colors cursor-pointer"
+                          className="text-footnote text-text-muted hover:text-accent transition-colors cursor-pointer"
                           aria-label={`Play from ${formatMs(seg.start_ms, isUnderOneHour)}`}
                         >
                           {formatMs(seg.start_ms, isUnderOneHour)}
@@ -484,7 +808,10 @@ export function TranscriptDrawer({
                         !isLive
                           ? "cursor-pointer hover:bg-bg-hover"
                           : ""
-                      } ${isActive ? "bg-accent/8" : ""}`}
+                      } ${isActive ? "bg-accent/8" : ""} ${seg.highlighted ? "bg-amber-500/5" : ""} ${
+                        isFindTarget ? "ring-1 ring-accent/40 bg-accent/5" : ""
+                      }`}
+                      data-find-target={isFindTarget || undefined}
                     >
                       {!isLive && (
                         <Play
@@ -492,16 +819,75 @@ export function TranscriptDrawer({
                           className="mt-1 shrink-0 text-accent opacity-0 transition-opacity group-hover:opacity-50 group-focus-within:opacity-50"
                         />
                       )}
-                      <p className="text-[13px] text-text-primary leading-relaxed flex-1">
-                        {searchQuery
-                          ? highlightSearch(seg.text, searchQuery)
-                          : seg.text}
-                      </p>
+                      {editing?.idx === idx ? (
+                        <div className="flex-1" onClick={(e) => e.stopPropagation()}>
+                          <textarea
+                            value={editing.draft}
+                            onChange={(e) => setEditing({ idx, draft: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault();
+                                saveEdit();
+                              } else if (e.key === "Escape") {
+                                e.stopPropagation();
+                                setEditing(null);
+                              }
+                            }}
+                            autoFocus
+                            rows={2}
+                            aria-label="Edit segment text"
+                            className="w-full rounded-lg border border-accent/40 bg-bg-tertiary px-2 py-1 text-body-sm text-text-primary leading-relaxed focus:outline-none"
+                          />
+                          <div className="mt-0.5 flex gap-2 text-footnote text-text-muted">
+                            <button type="button" onClick={saveEdit} className="text-accent hover:underline">
+                              Save
+                            </button>
+                            <button type="button" onClick={() => setEditing(null)} className="hover:text-text-primary">
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-body-sm text-text-primary leading-relaxed flex-1">
+                          {searchQuery
+                            ? highlightSearch(seg.text, searchQuery)
+                            : seg.text}
+                        </p>
+                      )}
+                      {!isLive && editing?.idx !== idx && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditing({ idx, draft: seg.text });
+                          }}
+                          aria-label="Edit segment text"
+                          title="Fix what was transcribed"
+                          className="shrink-0 pt-0.5 text-text-muted opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-60 group-focus-within:opacity-100 hover:!opacity-100 hover:text-text-primary"
+                        >
+                          <Pencil size={10} />
+                        </button>
+                      )}
+                      {!isLive && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); toggleHighlight(idx); }}
+                          aria-label={seg.highlighted ? "Remove flag from this moment" : "Flag this moment"}
+                          aria-pressed={!!seg.highlighted}
+                          className={`shrink-0 pt-0.5 transition-opacity ${
+                            seg.highlighted
+                              ? "text-amber-500 opacity-100"
+                              : "text-text-muted opacity-0 hover:text-amber-500 focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                          }`}
+                        >
+                          <Star size={10} fill={seg.highlighted ? "currentColor" : "none"} />
+                        </button>
+                      )}
                       {!showSpeaker && !isLive && (
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); seekToTimestamp(seg.start_ms); }}
-                          className="shrink-0 cursor-pointer pt-0.5 text-[10px] text-text-muted opacity-0 transition-opacity hover:text-accent focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                          className="shrink-0 cursor-pointer pt-0.5 text-footnote text-text-muted opacity-0 transition-opacity hover:text-accent focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
                           aria-label={`Play from ${formatMs(seg.start_ms, isUnderOneHour)}`}
                         >
                           {formatMs(seg.start_ms, isUnderOneHour)}
@@ -510,21 +896,22 @@ export function TranscriptDrawer({
                     </div>
                   </div>
                 );
-              })
+              })}
+              </div>
             )}
             {isLive && <div ref={liveBottomRef} />}
           </div>
 
           {/* Playback unavailable notice */}
           {audioSrc && audioError && !isLive && (
-            <div className="border-t border-border px-4 py-2 shrink-0 text-[11px] text-text-muted flex items-center gap-2">
+            <div className="border-t border-border px-4 py-2 shrink-0 text-caption text-text-muted flex items-center gap-2">
               <span>Recording not playable in this format</span>
             </div>
           )}
 
           {/* Mini audio player (only for stored transcript) */}
           {audioSrc && !audioError && !isLive && (
-            <div className="border-t border-border px-4 py-2.5 shrink-0" style={{ background: "var(--popup-bg)" }}>
+            <div className="border-t border-border bg-bg-secondary px-4 py-2.5 shrink-0">
               <audio
                 ref={audioRef}
                 src={audioSrc}
@@ -569,7 +956,7 @@ export function TranscriptDrawer({
                   <SkipForward size={12} />
                 </button>
 
-                <span className="text-[10px] font-mono text-text-muted w-10 text-center shrink-0">
+                <span className="text-footnote font-mono text-text-muted w-10 text-center shrink-0">
                   {formatSeconds(currentTime)}
                 </span>
 
@@ -584,14 +971,14 @@ export function TranscriptDrawer({
                   aria-label="Recording playback position"
                 />
 
-                <span className="text-[10px] font-mono text-text-muted w-10 text-center shrink-0">
+                <span className="text-footnote font-mono text-text-muted w-10 text-center shrink-0">
                   {formatSeconds(audioDuration)}
                 </span>
 
                 <button
                   type="button"
                   onClick={cycleSpeed}
-                  className="h-7 min-w-9 rounded border border-border bg-bg-tertiary px-1 font-mono text-[10px] text-text-secondary transition-colors hover:text-accent"
+                  className="h-7 min-w-9 rounded border border-border bg-bg-tertiary px-1 font-mono text-footnote text-text-secondary transition-colors hover:text-accent"
                   title="Playback speed"
                   aria-label="Playback speed"
                 >
@@ -603,111 +990,10 @@ export function TranscriptDrawer({
         </>
       )}
 
-      {/* ── Speakers Tab ── */}
+      {/* ── Speakers Tab — the single identification/rename surface ── */}
       {drawerTab === "speakers" && (
         <div className="flex-1 overflow-y-auto px-4 py-3">
-          {uniqueSpeakers.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-text-muted gap-1">
-              <Users size={24} className="opacity-30 mb-1" />
-              <p className="text-sm">No speakers detected</p>
-              <p className="text-xs mt-0.5">Speakers appear after transcription.</p>
-              {!isRecording && (
-                <button
-                  type="button"
-                  onClick={handleReanalyze}
-                  disabled={isReanalyzing}
-                  className="mt-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-border text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors disabled:opacity-50"
-                >
-                  {isReanalyzing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                  Re-analyze speakers
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">
-                  {uniqueSpeakers.length} Speaker{uniqueSpeakers.length !== 1 ? "s" : ""}
-                </p>
-                {!isRecording && (
-                  <button
-                    type="button"
-                    onClick={handleReanalyze}
-                    disabled={isReanalyzing}
-                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] border border-border text-text-muted hover:text-text-secondary hover:bg-bg-hover transition-colors disabled:opacity-50"
-                    title="Re-analyze speaker detection"
-                  >
-                    {isReanalyzing ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
-                    Re-analyze
-                  </button>
-                )}
-              </div>
-              {uniqueSpeakers.map(({ speaker, count, avgConf }) => {
-                const isEditing = editingSpeaker === speaker;
-                const displayName = getDisplayName(speaker);
-                const hexColor = getSpeakerHexColor(speaker);
-                const confPct = avgConf !== null ? Math.round(avgConf * 100) : null;
-                const confColor = confPct === null
-                  ? "text-text-muted"
-                  : confPct >= 70 ? "text-accent" : confPct >= 40 ? "text-warning" : "text-recording";
-
-                return (
-                  <div
-                    key={speaker}
-                    className="flex items-center gap-3 p-3 rounded-lg border"
-                    style={{ background: "var(--glass-search-bg)", borderColor: "var(--glass-search-border)" }}
-                  >
-                    {/* Color dot */}
-                    <div
-                      className="w-3 h-3 rounded-full shrink-0 mt-0.5"
-                      style={{ background: hexColor }}
-                    />
-
-                    {/* Name + edit */}
-                    <div className="flex-1 min-w-0">
-                      {isEditing ? (
-                        <input
-                          ref={editInputRef}
-                          type="text"
-                          value={editSpeakerName}
-                          onChange={(e) => setEditSpeakerName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") handleSaveSpeakerName(speaker);
-                            if (e.key === "Escape") setEditingSpeaker(null);
-                          }}
-                          onBlur={() => handleSaveSpeakerName(speaker)}
-                          className="w-full text-sm bg-bg-tertiary text-text-primary rounded px-2 py-0.5 border border-accent focus:outline-none"
-                        />
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleEditSpeaker(speaker)}
-                          className="text-sm font-medium text-text-primary hover:text-accent transition-colors text-left group flex items-center gap-1.5 w-full"
-                          title="Click to rename"
-                        >
-                          <span className="truncate">{displayName}</span>
-                          <Pencil size={10} className="shrink-0 opacity-0 group-hover:opacity-50 transition-opacity" />
-                        </button>
-                      )}
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <p className="text-[10px] text-text-muted">{speaker}</p>
-                        {confPct !== null && (
-                          <span className={`text-[10px] font-mono ${confColor}`}>
-                            {confPct}% conf
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Segment count */}
-                    <span className="text-[11px] text-text-muted bg-bg-tertiary rounded-full px-2 py-0.5 shrink-0">
-                      {count}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          <IdentifySpeakersPanel meetingId={meetingId} initialSpeaker={speakerFocus} />
         </div>
       )}
     </aside>

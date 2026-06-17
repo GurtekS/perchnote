@@ -68,7 +68,7 @@ export function MonthView({ meetings, currentDate, emptyState }: MonthViewProps)
         {DAY_NAMES.map((d) => (
           <div
             key={d}
-            className="py-1.5 text-center text-[10px] font-semibold uppercase tracking-widest text-text-muted"
+            className="py-1.5 text-center text-footnote font-semibold uppercase tracking-widest text-text-muted"
           >
             {d}
           </div>
@@ -102,7 +102,7 @@ export function MonthView({ meetings, currentDate, emptyState }: MonthViewProps)
                 {/* Day number */}
                 <div className="flex justify-end mb-1">
                   <span
-                    className="w-6 h-6 flex items-center justify-center rounded-full text-[12px] font-semibold"
+                    className="w-6 h-6 flex items-center justify-center rounded-full text-caption font-semibold"
                     style={
                       isToday(day)
                         ? { background: "var(--accent)", color: "white" }
@@ -135,7 +135,7 @@ export function MonthView({ meetings, currentDate, emptyState }: MonthViewProps)
                           />
                         )}
                         <span
-                          className="text-[10px] font-medium truncate"
+                          className="text-footnote font-medium truncate"
                           style={{ color: "var(--accent)" }}
                         >
                           {m.title}
@@ -144,7 +144,7 @@ export function MonthView({ meetings, currentDate, emptyState }: MonthViewProps)
                     );
                   })}
                   {overflow > 0 && (
-                    <p className="text-[10px] text-text-muted px-1">
+                    <p className="text-footnote text-text-muted px-1">
                       +{overflow} more
                     </p>
                   )}

@@ -163,7 +163,7 @@ describe("navigation and list polish", () => {
 
     fireEvent.keyDown(input, { key: "ArrowDown" });
 
-    expect(screen.getByRole("option", { name: "Start Recording" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("option", { name: /Start Recording/ })).toHaveAttribute("aria-selected", "true");
   });
 
   it("creates and opens a meeting from the command palette", async () => {

@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ipc } from "../lib/ipc";
 
-export type OnboardingStepId = "privacy" | "audio" | "ai" | "calendar" | "start";
+export type OnboardingStepId = "privacy" | "audio" | "ai" | "calendar" | "test" | "start";
 
 export interface OnboardingProgress {
   isComplete: boolean;
@@ -22,7 +22,7 @@ const ONBOARDING_STEP_MILESTONE_KEYS: Partial<Record<OnboardingStepId, string>> 
   calendar: "onboarding_viewed_calendar_setup",
 };
 
-const STEP_IDS: OnboardingStepId[] = ["privacy", "audio", "ai", "calendar", "start"];
+const STEP_IDS: OnboardingStepId[] = ["privacy", "audio", "ai", "calendar", "test", "start"];
 
 const EMPTY_PROGRESS: OnboardingProgress = {
   isComplete: false,

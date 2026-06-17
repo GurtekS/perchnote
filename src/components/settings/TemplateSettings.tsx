@@ -25,6 +25,15 @@ export function TemplateSettings() {
     toast.success(`"${t.name}" is now the default template`);
   };
 
+  // Default-template picker (moved here from General — it shapes generated
+  // notes, so it belongs with the templates it picks between). Drives the
+  // same templates.is_default mechanism as the per-row check button.
+  const currentDefaultId = templates.find((t) => t.is_default)?.id ?? "";
+  const handleDefaultTemplateChange = async (templateId: string) => {
+    const t = templates.find((x) => x.id === templateId);
+    if (t) await handleSetDefault(t);
+  };
+
   const handleDelete = async () => {
     if (!deleteTarget) return;
     await ipc.deleteTemplate(deleteTarget.id);
@@ -42,12 +51,31 @@ export function TemplateSettings() {
         </div>
         <button
           onClick={() => setCreating(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-medium hover:opacity-90 transition-opacity"
+          className="btn btn-primary"
         >
           <Plus size={13} />
           New Template
         </button>
       </div>
+
+      {/* Default Template */}
+      <section>
+        <h3 className="text-sm font-semibold text-text-primary mb-1">Default Template</h3>
+        <p className="text-xs text-text-muted mb-3">Choose the template used when generating notes.</p>
+        <select
+          value={currentDefaultId}
+          onChange={(e) => handleDefaultTemplateChange(e.target.value)}
+          aria-label="Default template"
+          className="w-full bg-bg-tertiary text-text-primary text-sm rounded-lg px-3 py-2 border border-border focus:outline-none focus:border-accent"
+        >
+          {templates.length === 0 && <option value="">No templates yet</option>}
+          {templates.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+      </section>
 
       <div className="space-y-2">
         {templates.map((t) => (
@@ -59,10 +87,10 @@ export function TemplateSettings() {
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-text-primary truncate">{t.name}</span>
                 {t.is_default && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent/15 text-accent font-medium shrink-0">Default</span>
+                  <span className="text-footnote px-1.5 py-0.5 rounded-full bg-accent/15 text-accent font-medium shrink-0">Default</span>
                 )}
                 {t.is_builtin && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-muted font-medium shrink-0">Built-in</span>
+                  <span className="text-footnote px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-muted font-medium shrink-0">Built-in</span>
                 )}
               </div>
               {t.description && (
@@ -202,7 +230,7 @@ function TemplateForm({
             onChange={(e) => setPromptTemplate(e.target.value)}
             rows={6}
             className="w-full px-3 py-2 rounded-lg bg-bg-primary border border-border text-sm text-text-primary font-mono focus:outline-none focus:border-accent resize-none"
-            placeholder="Instructions for the AI when generating notes for this template..."
+            placeholder="Instructions for the AI when generating notes for this template…"
           />
         </div>
 
@@ -220,14 +248,14 @@ function TemplateForm({
       <div className="flex justify-end gap-2">
         <button
           onClick={onCancel}
-          className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors"
+          className="btn btn-ghost"
         >
           Cancel
         </button>
         <button
           onClick={handleSave}
           disabled={saving}
-          className="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+          className="btn btn-primary"
         >
           {saving ? "Saving…" : "Save"}
         </button>

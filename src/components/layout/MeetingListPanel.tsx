@@ -3,18 +3,21 @@ import { useNavigate, useMatchRoute } from "@tanstack/react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Plus, Pin, Archive, Trash2, Search, FolderIcon,
-  LayoutList, X, Check,
+  Plus, Pin, Archive, Trash2, Search, FolderIcon, FolderInput,
+  LayoutList, X, Check, PanelLeftClose,
 } from "lucide-react";
+import { useUIStore } from "../../stores/uiStore";
 import { MeetingBanner } from "./MeetingBanner";
-import { ipc, Meeting, Folder } from "../../lib/ipc";
+import { ipc, Meeting, Folder, buildFolderTree, FolderNode } from "../../lib/ipc";
 import { format, isToday, isYesterday, isThisWeek, isTomorrow } from "date-fns";
-import { ContextMenu, ContextMenuItem } from "../shared/ContextMenu";
+import { ContextMenu, ContextMenuItem, ContextSubItem } from "../shared/ContextMenu";
 import { ConfirmDialog } from "../shared/ConfirmDialog";
 import { toast } from "../../stores/toastStore";
+import { toUserMessage } from "../../lib/errors";
 import { useRecordingStore } from "../../stores/recordingStore";
 import { startPendingDrag, consumeDragOccurred } from "../../lib/meetingDrag";
 import { MeetingStatusBadge } from "../shared/MeetingStatusBadge";
+import { useRovingFocus } from "../../hooks/useRovingFocus";
 
 // ─── Helpers (same as Sidebar.tsx) ───────────────────────────────────────────
 
@@ -74,6 +77,10 @@ export function MeetingListPanel() {
   const queryClient = useQueryClient();
   const recordingMeetingId = useRecordingStore((s) => s.meetingId);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  // One tab stop for the whole meeting list; ↑/↓/Home/End rove between
+  // rows, Space toggles selection, Enter opens (plan v6 item 7).
+  useRovingFocus(listRef, "[data-roving-item]");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Meeting | null>(null);
@@ -91,6 +98,14 @@ export function MeetingListPanel() {
   const { data: folders = [] } = useQuery<Folder[]>({
     queryKey: ["folders"],
     queryFn: () => invoke("list_folders"),
+  });
+
+  // Folder memberships for the per-row "Move to folder…" submenu — same
+  // one-round-trip map NotesList uses, same invalidation key.
+  const { data: folderMembershipsData } = useQuery<Record<string, string[]>>({
+    queryKey: ["folderMembershipsMap"],
+    queryFn: ipc.getFolderMembershipsMap,
+    staleTime: 5 * 60_000,
   });
 
   // ─── Listen for search focus event from IconRail ───────────────────────────
@@ -129,11 +144,25 @@ export function MeetingListPanel() {
 
   const handleDeleteMeeting = async () => {
     if (!deleteTarget) return;
-    await ipc.softDeleteMeeting(deleteTarget.id);
+    try {
+      await ipc.softDeleteMeeting(deleteTarget.id);
+    } catch (e) {
+      // e.g. "this meeting is recording — stop first" (review P2 guard)
+      toast.error(toUserMessage(e));
+      setDeleteTarget(null);
+      return;
+    }
     queryClient.invalidateQueries({ queryKey: ["meetings"] });
+    queryClient.invalidateQueries({ queryKey: ["deletedMeetings"] });
     toast.success(`"${deleteTarget.title}" moved to trash`);
+    const deletedId = deleteTarget.id;
     setDeleteTarget(null);
-    navigate({ to: "/" });
+    // Kick the user home only if they were LOOKING at the deleted meeting —
+    // deleting an unrelated row used to eject them from the one they were
+    // editing (whole-app review P3).
+    if (window.location.pathname.includes(deletedId)) {
+      navigate({ to: "/" });
+    }
   };
 
   const handleTogglePin = useCallback(async (meeting: Meeting) => {
@@ -145,7 +174,12 @@ export function MeetingListPanel() {
   const handleArchive = useCallback(async (meeting: Meeting) => {
     await ipc.archiveMeeting(meeting.id);
     queryClient.invalidateQueries({ queryKey: ["meetings"] });
-    toast.info("Meeting archived");
+    // Archive was a one-way door (friction audit #6) — undo here, and the
+    // full archived list lives in Settings → Data.
+    toast.action("Meeting archived", "Undo", async () => {
+      await ipc.unarchiveMeeting(meeting.id);
+      queryClient.invalidateQueries({ queryKey: ["meetings"] });
+    });
   }, [queryClient]);
 
   // ─── Bulk actions ──────────────────────────────────────────────────────────
@@ -171,20 +205,41 @@ export function MeetingListPanel() {
     setSelectedIds(new Set(allIds));
   }, [meetings, searchQuery]);
 
+  // Confirmed like single delete (deep review P2: bulk had NO confirm and
+  // unconditionally kicked the user Home — inverted risk handling). The
+  // toast names the way back, and navigation only happens if the OPEN
+  // meeting was among the deleted.
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const handleBulkDelete = async () => {
     const ids = Array.from(selectedIds);
-    await Promise.all(ids.map((id) => ipc.softDeleteMeeting(id)));
+    setConfirmBulkDelete(false);
+    const results = await Promise.allSettled(ids.map((id) => ipc.softDeleteMeeting(id)));
+    const failed = results.filter((r) => r.status === "rejected").length;
     queryClient.invalidateQueries({ queryKey: ["meetings"] });
-    toast.success(`${ids.length} meeting${ids.length !== 1 ? "s" : ""} deleted`);
+    queryClient.invalidateQueries({ queryKey: ["deletedMeetings"] });
+    if (failed > 0) {
+      toast.error(`${failed} of ${ids.length} couldn't be moved to trash`);
+    } else {
+      toast.success(`${ids.length} meeting${ids.length !== 1 ? "s" : ""} moved to trash — restore from Trash below`);
+    }
     clearSelection();
-    navigate({ to: "/" });
+    if (ids.some((id) => window.location.pathname.includes(id))) {
+      navigate({ to: "/" });
+    }
   };
 
   const handleBulkArchive = async () => {
     const ids = Array.from(selectedIds);
     await Promise.all(ids.map((id) => ipc.archiveMeeting(id)));
     queryClient.invalidateQueries({ queryKey: ["meetings"] });
-    toast.success(`${ids.length} meeting${ids.length !== 1 ? "s" : ""} archived`);
+    toast.action(
+      `${ids.length} meeting${ids.length !== 1 ? "s" : ""} archived`,
+      "Undo",
+      async () => {
+        await Promise.all(ids.map((id) => ipc.unarchiveMeeting(id)));
+        queryClient.invalidateQueries({ queryKey: ["meetings"] });
+      },
+    );
     clearSelection();
   };
 
@@ -199,37 +254,103 @@ export function MeetingListPanel() {
 
   // ─── Context menus ─────────────────────────────────────────────────────────
 
+  const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
+
+  // Single-meeting "Move to folder…" submenu (deep review P2: the sidebar
+  // context menu had no folder action, and a sidebar drag has no drop
+  // target anywhere the panel renders). Same toggle-membership pattern as
+  // NoteCard's submenu.
+  const getFolderSubItems = useCallback(
+    (meetingId: string): ContextSubItem[] => {
+      const memberIds = new Set(folderMembershipsData?.[meetingId] ?? []);
+      const items: ContextSubItem[] = [];
+      const walk = (nodes: FolderNode[], depth: number) => {
+        for (const node of nodes) {
+          const isIn = memberIds.has(node.id);
+          items.push({
+            label: node.name,
+            icon: (
+              <span
+                className="w-2 h-2 rounded-full shrink-0 inline-block"
+                style={{ background: node.color }}
+              />
+            ),
+            indent: depth,
+            checked: isIn,
+            onClick: async () => {
+              try {
+                if (isIn) await ipc.removeMeetingFromFolder(meetingId, node.id);
+                else await ipc.addMeetingToFolder(meetingId, node.id);
+                queryClient.invalidateQueries({ queryKey: ["meetings"] });
+                queryClient.invalidateQueries({ queryKey: ["folders"] });
+                queryClient.invalidateQueries({ queryKey: ["folderMembershipsMap"] });
+                queryClient.invalidateQueries({ queryKey: ["folderMeetings", node.id] });
+                queryClient.invalidateQueries({ queryKey: ["meetings", "folder", node.id] });
+              } catch (e) {
+                toast.error(toUserMessage(e));
+              }
+            },
+          });
+          walk(node.children, depth + 1);
+        }
+      };
+      walk(folderTree, 0);
+      return items;
+    },
+    [folderTree, folderMembershipsData, queryClient],
+  );
+
   const getMeetingContextItems = useCallback(
-    (meeting: Meeting): ContextMenuItem[] => [
-      {
-        label: "Open",
-        icon: <LayoutList size={14} />,
-        onClick: () => navigate({ to: "/meeting/$id", params: { id: meeting.id } }),
-      },
-      {
-        label: meeting.is_pinned ? "Unpin" : "Pin",
-        icon: <Pin size={14} />,
-        onClick: () => handleTogglePin(meeting),
-      },
-      {
-        label: "Archive",
-        icon: <Archive size={14} />,
-        onClick: () => handleArchive(meeting),
-      },
-      {
-        label: "Delete",
-        icon: <Trash2 size={14} />,
-        onClick: () => setDeleteTarget(meeting),
-        variant: "danger",
-        divider: true,
-      },
-    ],
-    [navigate, handleTogglePin, handleArchive],
+    (meeting: Meeting): ContextMenuItem[] => {
+      const folderSubItems = getFolderSubItems(meeting.id);
+      return [
+        {
+          label: "Open",
+          icon: <LayoutList size={14} />,
+          onClick: () => navigate({ to: "/meeting/$id", params: { id: meeting.id } }),
+        },
+        {
+          label: meeting.is_pinned ? "Unpin" : "Pin",
+          icon: <Pin size={14} />,
+          onClick: () => handleTogglePin(meeting),
+        },
+        {
+          label: "Move to folder…",
+          icon: <FolderInput size={14} />,
+          submenu: {
+            title: "Move to folder",
+            items:
+              folderSubItems.length > 0
+                ? folderSubItems
+                : [{ label: "No folders yet", onClick: () => {} }],
+          },
+        },
+        {
+          label: "Archive",
+          icon: <Archive size={14} />,
+          onClick: () => handleArchive(meeting),
+        },
+        {
+          label: "Delete",
+          icon: <Trash2 size={14} />,
+          onClick: () => setDeleteTarget(meeting),
+          variant: "danger",
+          divider: true,
+        },
+      ];
+    },
+    [navigate, handleTogglePin, handleArchive, getFolderSubItems],
   );
 
   // ─── Filtered + grouped data ───────────────────────────────────────────────
 
   const lowerSearch = searchQuery.toLowerCase();
+
+  const { data: trashCount = 0 } = useQuery({
+    queryKey: ["deletedMeetings", "count"],
+    queryFn: async () => (await ipc.listDeletedMeetings()).length,
+    staleTime: 30_000,
+  });
 
   const upcomingMeetings = useMemo(
     () =>
@@ -281,6 +402,7 @@ export function MeetingListPanel() {
 
   return (
     <aside
+      data-pane="list"
       className="w-[244px] h-full flex flex-col shrink-0 overflow-hidden"
       style={{
         background: "var(--glass-panel-bg)",
@@ -298,22 +420,39 @@ export function MeetingListPanel() {
         style={{ borderBottom: "1px solid var(--glass-header-border)" }}
       >
         <span
-          className="flex-1 text-[11px] font-semibold tracking-widest uppercase"
+          className="flex-1 text-caption font-semibold tracking-widest uppercase"
           style={{ color: "var(--panel-label-color)" }}
         >
           Meetings
         </span>
         <button
           type="button"
+          onClick={() => {
+            useUIStore.getState().toggleSidebar();
+            // This button unmounts with the panel it just hid — park
+            // keyboard focus on the rail's show/hide toggle instead of
+            // letting it drop to <body>.
+            document.getElementById("rail-toggle-meeting-list")?.focus();
+          }}
+          className="w-6 h-6 rounded-md flex items-center justify-center transition-colors hover:bg-bg-hover"
+          style={{ color: "var(--icon-color-dim)" }}
+          title="Hide meeting list (⌘B)"
+          aria-label="Hide meeting list"
+          aria-expanded="true"
+        >
+          <PanelLeftClose size={14} />
+        </button>
+        <button
+          type="button"
           onClick={handleNewMeeting}
           className="w-6 h-6 rounded-md flex items-center justify-center transition-colors"
           style={{ color: "var(--icon-color-dim)" }}
-          title="New Meeting (⌘N)"
-          aria-label="New Meeting"
+          title="New meeting — without recording (⌘N creates one AND records)"
+          aria-label="New meeting — without recording"
           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--icon-hover-bg)"; (e.currentTarget as HTMLElement).style.color = "var(--icon-color-bright)"; }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ""; (e.currentTarget as HTMLElement).style.color = "var(--icon-color-dim)"; }}
         >
-          <Plus size={13} />
+          <Plus size={14} />
         </button>
       </div>
 
@@ -331,7 +470,7 @@ export function MeetingListPanel() {
             placeholder="Search meetings…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="flex-1 bg-transparent text-[12px] outline-none placeholder:text-text-muted"
+            className="flex-1 bg-transparent text-caption outline-none placeholder:text-text-muted"
             style={{ color: "var(--search-text-color)" }}
           />
           {searchQuery && (
@@ -355,7 +494,7 @@ export function MeetingListPanel() {
         >
           {!showBulkFolderPicker ? (
             <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-[11px] flex-1" style={{ color: "var(--icon-color-bright)" }}>
+              <span className="text-caption flex-1" style={{ color: "var(--icon-color-bright)" }}>
                 {selectedIds.size} selected
                 {" · "}
                 <button type="button" className="underline" onClick={handleSelectAll} style={{ color: "var(--accent)" }}>select visible</button>
@@ -371,19 +510,19 @@ export function MeetingListPanel() {
                 <X size={12} />
               </button>
               <div className="w-full flex gap-1">
-                <button type="button" onClick={handleBulkArchive} className="flex-1 text-[11px] py-0.5 rounded-md" style={{ background: "var(--icon-hover-bg)", color: "var(--icon-color-bright)" }}>Archive</button>
-                <button type="button" onClick={() => setShowBulkFolderPicker(true)} className="flex-1 text-[11px] py-0.5 rounded-md" style={{ background: "var(--icon-hover-bg)", color: "var(--icon-color-bright)" }}>Move</button>
-                <button type="button" onClick={handleBulkDelete} className="flex-1 text-[11px] py-0.5 rounded-md" style={{ background: "rgba(239,68,68,0.15)", color: "rgba(239,68,68,0.8)" }}>Delete</button>
+                <button type="button" onClick={handleBulkArchive} className="flex-1 text-caption py-0.5 rounded-md" style={{ background: "var(--icon-hover-bg)", color: "var(--icon-color-bright)" }}>Archive</button>
+                <button type="button" onClick={() => setShowBulkFolderPicker(true)} className="flex-1 text-caption py-0.5 rounded-md" style={{ background: "var(--icon-hover-bg)", color: "var(--icon-color-bright)" }}>Move</button>
+                <button type="button" onClick={() => setConfirmBulkDelete(true)} className="flex-1 text-caption py-0.5 rounded-md" style={{ background: "rgba(239,68,68,0.15)", color: "rgba(239,68,68,0.8)" }}>Delete</button>
               </div>
             </div>
           ) : (
             <div>
               <div className="flex items-center gap-1 mb-1">
-                <button type="button" onClick={() => setShowBulkFolderPicker(false)} className="text-[11px]" style={{ color: "var(--accent)" }}>Back</button>
-                <span className="text-[11px] flex-1 text-center" style={{ color: "var(--icon-color-dim)" }}>Move to folder</span>
+                <button type="button" onClick={() => setShowBulkFolderPicker(false)} className="text-caption" style={{ color: "var(--accent)" }}>Back</button>
+                <span className="text-caption flex-1 text-center" style={{ color: "var(--icon-color-dim)" }}>Move to folder</span>
               </div>
               {allFolders.length === 0 ? (
-                <p className="px-2 py-1.5 text-[11px]" style={{ color: "var(--section-label-color)" }}>
+                <p className="px-2 py-1.5 text-caption" style={{ color: "var(--section-label-color)" }}>
                   No folders yet
                 </p>
               ) : (
@@ -392,7 +531,7 @@ export function MeetingListPanel() {
                     type="button"
                     key={f.id}
                     onClick={() => handleBulkMoveToFolder(f.id)}
-                    className="w-full text-left text-[11px] px-2 py-1 rounded-md flex items-center gap-2"
+                    className="w-full text-left text-caption px-2 py-1 rounded-md flex items-center gap-2"
                     style={{ color: "var(--icon-color-bright)" }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--icon-hover-bg)"; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ""; }}
@@ -408,7 +547,7 @@ export function MeetingListPanel() {
       )}
 
       {/* Meeting list */}
-      <div className="flex-1 overflow-y-auto py-1.5 px-1.5">
+      <div ref={listRef} className="flex-1 overflow-y-auto py-1.5 px-1.5">
         {/* Upcoming */}
         {upcomingMeetings.length > 0 && (
           <div className="mb-1">
@@ -469,7 +608,7 @@ export function MeetingListPanel() {
             <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "var(--glass-search-bg)" }}>
               <Search size={14} style={{ color: "var(--section-label-color)" }} />
             </div>
-            <p className="text-[11px]" style={{ color: "var(--section-label-color)" }}>
+            <p className="text-caption" style={{ color: "var(--section-label-color)" }}>
               No meetings match <span className="font-medium" style={{ color: "var(--meeting-title-color)" }}>"{searchQuery}"</span>
             </p>
           </div>
@@ -481,13 +620,13 @@ export function MeetingListPanel() {
               <LayoutList size={16} style={{ color: "var(--section-label-color)" }} />
             </div>
             <div>
-              <p className="text-[12px] font-medium" style={{ color: "var(--meeting-title-color)" }}>No meetings yet</p>
-              <p className="text-[11px] mt-0.5" style={{ color: "var(--section-label-color)" }}>Start recording to capture your first meeting</p>
+              <p className="text-caption font-medium" style={{ color: "var(--meeting-title-color)" }}>No meetings yet</p>
+              <p className="text-caption mt-0.5" style={{ color: "var(--section-label-color)" }}>Start recording to capture your first meeting</p>
             </div>
             <button
               type="button"
               onClick={handleNewMeeting}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-caption font-medium transition-colors"
               style={{ background: "rgba(var(--accent-rgb),0.15)", border: "1px solid rgba(var(--accent-rgb),0.25)", color: "var(--accent)" }}
             >
               <Plus size={13} />
@@ -496,6 +635,35 @@ export function MeetingListPanel() {
           </div>
         )}
       </div>
+
+      {/* Trash bin entry (user request): deleted meetings are recoverable —
+          say so where deletion happens, not three levels into settings. */}
+      {trashCount > 0 && (
+        <button
+          type="button"
+          onClick={() => navigate({ to: "/settings", search: { section: "data" } })}
+          className="shrink-0 flex items-center gap-2 px-3.5 py-2 text-left transition-colors hover:bg-bg-hover"
+          style={{ borderTop: "1px solid var(--glass-header-border)", color: "var(--icon-color-dim)" }}
+          title="Open the trash — restore or permanently delete"
+        >
+          <Trash2 size={12} className="shrink-0" />
+          <span className="text-caption" style={{ color: "var(--meeting-meta-color)" }}>
+            Trash · {trashCount}
+          </span>
+        </button>
+      )}
+
+      {confirmBulkDelete && (
+        <ConfirmDialog
+          open={true}
+          title="Move to trash?"
+          message={`${selectedIds.size} meeting${selectedIds.size !== 1 ? "s" : ""} will move to trash. You can restore them from Trash.`}
+          confirmLabel="Move to Trash"
+          variant="danger"
+          onConfirm={handleBulkDelete}
+          onCancel={() => setConfirmBulkDelete(false)}
+        />
+      )}
 
       {/* Delete confirmation */}
       {deleteTarget && (
@@ -519,7 +687,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div className="px-2 pt-2.5 pb-1 flex items-center gap-2">
       <span
-        className="text-[10px] font-semibold tracking-[0.08em] uppercase whitespace-nowrap"
+        className="text-footnote font-semibold tracking-[0.08em] uppercase whitespace-nowrap"
         style={{ color: "var(--section-label-color)" }}
       >
         {children}
@@ -578,9 +746,10 @@ function UpcomingEventRow({
       >
         <button
           type="button"
-          className="shrink-0 flex h-[18px] w-[16px] items-center justify-center rounded-[4px] transition-opacity"
+          tabIndex={-1}
+          className="row-checkbox shrink-0 flex h-[18px] w-[16px] items-center justify-center rounded-[4px] transition-opacity"
           style={{
-            opacity: showCheckbox ? 1 : 0.34,
+            ...(showCheckbox ? { opacity: 1 } : {}),
             background: selected ? "var(--accent)" : "transparent",
             boxShadow: selected
               ? "inset 0 0 0 1.5px var(--accent)"
@@ -596,11 +765,15 @@ function UpcomingEventRow({
 
         <button
           type="button"
+          data-roving-item
           className="flex min-w-0 flex-1 items-center gap-2 rounded-md bg-transparent text-left"
           onClick={() => { if (!consumeDragOccurred()) onClick(); }}
           onPointerDown={(e) => startPendingDrag(meeting.id, meeting.title, e.clientX, e.clientY)}
+          onKeyDown={(e) => {
+            if (e.key === " ") { e.preventDefault(); onSelect(); }
+          }}
           aria-current={active ? "page" : undefined}
-          aria-label={`Open ${meeting.title}`}
+          aria-label={`Open ${meeting.title}${selected ? " (selected)" : ""}`}
         >
         {/* Date block */}
         <span
@@ -630,16 +803,16 @@ function UpcomingEventRow({
         {/* Content */}
         <span className="flex-1 min-w-0">
           <span
-            className="block text-[12px] font-medium truncate leading-tight mb-0.5"
+            className="block text-caption font-medium truncate leading-tight mb-0.5"
             style={{ color: active ? "rgba(var(--accent-rgb), 0.95)" : "var(--meeting-title-color)" }}
           >
             {meeting.is_pinned && (
-              <span className="mr-1" style={{ color: "var(--accent)" }}>·</span>
+              <Pin size={9} className="mr-1 inline shrink-0" style={{ color: "var(--accent)" }} aria-label="Pinned" />
             )}
             {meeting.title}
           </span>
           <span
-            className="block text-[10px]"
+            className="block text-footnote"
             style={{ color: active ? "rgba(var(--accent-rgb), 0.65)" : "var(--meeting-meta-color)" }}
           >
             {timeStr}{durStr ? ` · ${durStr}` : ""}
@@ -687,12 +860,13 @@ function MeetingRow({
   return (
     <ContextMenu items={contextItems}>
       <div
-        className="flex items-center rounded-[9px] mb-0.5 select-none transition-all duration-100"
+        className="flex items-center rounded-[var(--radius-md)] mb-0.5 select-none transition-all duration-100"
         style={
           active
             ? {
                 background: "rgba(var(--accent-rgb), 0.13)",
                 border: "1px solid rgba(var(--accent-rgb), 0.22)",
+                boxShadow: "inset 2.5px 0 0 var(--accent)",
                 padding: "6px 8px",
               }
             : {
@@ -710,9 +884,10 @@ function MeetingRow({
       >
         <button
           type="button"
-          className="mr-1.5 shrink-0 flex h-[18px] w-[16px] items-center justify-center rounded-[4px] transition-opacity"
+          tabIndex={-1}
+          className="row-checkbox mr-1.5 shrink-0 flex h-[18px] w-[16px] items-center justify-center rounded-[4px] transition-opacity"
           style={{
-            opacity: showCheckbox ? 1 : 0.34,
+            ...(showCheckbox ? { opacity: 1 } : {}),
             background: selected ? "var(--accent)" : "transparent",
             boxShadow: selected
               ? "inset 0 0 0 1.5px var(--accent)"
@@ -728,24 +903,28 @@ function MeetingRow({
 
         <button
           type="button"
+          data-roving-item
           className="flex min-w-0 flex-1 items-center rounded-md bg-transparent text-left"
           onClick={() => { if (!consumeDragOccurred()) onClick(); }}
           onPointerDown={(e) => startPendingDrag(meeting.id, meeting.title, e.clientX, e.clientY)}
+          onKeyDown={(e) => {
+            if (e.key === " ") { e.preventDefault(); onSelect(); }
+          }}
           aria-current={active ? "page" : undefined}
-          aria-label={`Open ${meeting.title}`}
+          aria-label={`Open ${meeting.title}${selected ? " (selected)" : ""}`}
         >
         <span className="flex-1 min-w-0">
           <span
-            className="block text-[12px] font-medium truncate leading-tight mb-0.5"
+            className="block text-caption font-medium truncate leading-tight mb-0.5"
             style={{ color: active ? "rgba(var(--accent-rgb), 0.95)" : "var(--meeting-title-color)" }}
           >
             {meeting.is_pinned && (
-              <span className="mr-1 text-[10px]" style={{ color: "var(--accent)" }}>·</span>
+              <Pin size={9} className="mr-1 inline shrink-0" style={{ color: "var(--accent)" }} aria-label="Pinned" />
             )}
             {meeting.title}
           </span>
           <span
-            className="block text-[10px]"
+            className="block text-footnote"
             style={{ color: active ? "rgba(var(--accent-rgb), 0.7)" : "var(--meeting-meta-color)" }}
           >
             {timeLabel}

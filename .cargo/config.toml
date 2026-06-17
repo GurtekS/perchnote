@@ -6,3 +6,18 @@
 # fingerprints.
 [build]
 rustflags = ["--remap-path-prefix=/Users/admin=/build"]
+
+# The Rust remap above does NOT touch C/C++ `__FILE__` paths baked into the
+# whisper.cpp / ggml sources (compiled via cmake by whisper-rs-sys), which
+# otherwise embed the full build path in the shipped binary. whisper-rs-sys
+# forwards any `CMAKE_*` env var into its cmake config, so map the build
+# user's home prefix to `/build` for the C/C++ compilers too — same prefix
+# as the Rust remap above. (Must be a space-free prefix: cmake word-splits
+# CMAKE_*_FLAGS, so mapping the full project path "…/Meeting Assistant" would
+# break on the space. Mapping `/Users/admin` strips the username/home; the
+# residual `/build/Documents/Meeting Assistant/…` carries no personal data.)
+# After changing this, the whisper build is cached —
+# `rm -rf src-tauri/target/*/build/whisper-rs-sys-*` to force a recompile.
+[env]
+CMAKE_C_FLAGS = "-ffile-prefix-map=/Users/admin=/build"
+CMAKE_CXX_FLAGS = "-ffile-prefix-map=/Users/admin=/build"

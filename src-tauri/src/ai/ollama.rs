@@ -36,6 +36,31 @@ struct ChatRequest<'a> {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     format: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    options: Option<ChatOptions>,
+}
+
+#[derive(Serialize)]
+struct ChatOptions {
+    num_ctx: u32,
+    /// 0.0 for structured extraction reliability (official Ollama guidance).
+    temperature: f32,
+}
+
+/// Context window sized to the prompt (plan v2 rank 3). Ollama defaults to
+/// a small num_ctx and silently truncates anything beyond it — a one-hour
+/// meeting prompt would lose its beginning with no error. chars/4 ≈ tokens,
+/// plus reply headroom, clamped to a sane ceiling.
+fn ctx_for_prompt(prompt: &str) -> u32 {
+    let est_prompt_tokens = (prompt.len() / 4) as u32;
+    let with_headroom = est_prompt_tokens.saturating_add(2048);
+    if with_headroom > 32_768 {
+        log::warn!(
+            "Ollama prompt (~{} est. tokens) exceeds the 32k num_ctx ceiling — older context may be truncated",
+            est_prompt_tokens
+        );
+    }
+    with_headroom.clamp(4096, 32_768)
 }
 
 #[derive(Serialize)]
@@ -70,6 +95,7 @@ async fn chat_request(model: &str, prompt: &str, schema: Option<Value>) -> Resul
         messages: vec![Message { role: "user", content: prompt }],
         stream: false,
         format: schema,
+        options: Some(ChatOptions { num_ctx: ctx_for_prompt(prompt), temperature: 0.0 }),
     };
     let resp = client()
         .post(format!("{}/api/chat", BASE_URL))
@@ -88,6 +114,69 @@ async fn chat_request(model: &str, prompt: &str, schema: Option<Value>) -> Resul
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
+
+/// Streaming variant (plan v2 rank 4): NDJSON lines from /api/chat, each
+/// message.content fragment fed through the shared SummaryStreamer so
+/// fully-local users get the same live-writing Enhance as Anthropic users.
+pub async fn generate_notes_streaming(
+    prompt: &str,
+    model: &str,
+    on_delta: &(dyn Fn(&str) + Send + Sync),
+) -> Result<GeneratedNotes> {
+    use futures_util::StreamExt;
+    let schema: Value = serde_json::from_str(NOTE_OUTPUT_SCHEMA)?;
+    let req = ChatRequest {
+        model,
+        messages: vec![Message { role: "user", content: prompt }],
+        stream: true,
+        format: Some(schema),
+        options: Some(ChatOptions { num_ctx: ctx_for_prompt(prompt), temperature: 0.0 }),
+    };
+    let resp = client()
+        .post(format!("{}/api/chat", BASE_URL))
+        .json(&req)
+        .send()
+        .await
+        .map_err(|e| anyhow!("Ollama is unreachable at {} — is it running? ({})", BASE_URL, e))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(anyhow!("Ollama HTTP {}: {}", status, body));
+    }
+
+    let mut stream = resp.bytes_stream();
+    let mut line_buf = String::new();
+    let mut full = String::new();
+    let mut summary = crate::ai::anthropic_api::SummaryStreamer::new();
+    'outer: while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| anyhow!("Ollama stream read failed: {}", e))?;
+        line_buf.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(nl) = line_buf.find('\n') {
+            let line: String = line_buf[..nl].trim().to_string();
+            line_buf.drain(..=nl);
+            if line.is_empty() {
+                continue;
+            }
+            let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+            if let Some(frag) = v.pointer("/message/content").and_then(|c| c.as_str()) {
+                full.push_str(frag);
+                if let Some(text) = summary.feed(frag) {
+                    if !text.is_empty() {
+                        on_delta(&text);
+                    }
+                }
+            }
+            if v.get("done").and_then(|d| d.as_bool()) == Some(true) {
+                break 'outer;
+            }
+        }
+    }
+
+    let cleaned = strip_json_fences(&full);
+    serde_json::from_str::<GeneratedNotes>(cleaned)
+        .map_err(|e| anyhow!("Ollama returned non-conforming JSON for notes: {} (raw: {})", e, full))
+        .or_else(|_| salvage_notes_from_partial(&full))
+}
 
 pub async fn generate_notes(prompt: &str, model: &str) -> Result<GeneratedNotes> {
     let schema: Value = serde_json::from_str(NOTE_OUTPUT_SCHEMA)?;
@@ -136,6 +225,37 @@ pub fn is_running_blocking() -> bool {
     matches!(result, Ok(r) if r.status().is_success())
 }
 
+/// Embed a batch of texts via `/api/embed` (the current endpoint; the old
+/// /api/embeddings is deprecated). Order is preserved; vectors come back
+/// L2-normalized. Used by hybrid semantic recall (plan v2 rank 10).
+pub async fn embed(model: &str, inputs: &[String]) -> Result<Vec<Vec<f32>>> {
+    #[derive(serde::Deserialize)]
+    struct EmbedResponse {
+        embeddings: Vec<Vec<f32>>,
+    }
+    if inputs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let resp = client()
+        .post(format!("{}/api/embed", BASE_URL))
+        .json(&serde_json::json!({ "model": model, "input": inputs }))
+        .send()
+        .await
+        .map_err(|e| anyhow!("Ollama is unreachable: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("Ollama embed HTTP {}", resp.status()));
+    }
+    let parsed: EmbedResponse = resp.json().await?;
+    if parsed.embeddings.len() != inputs.len() {
+        return Err(anyhow!(
+            "Ollama embed returned {} vectors for {} inputs",
+            parsed.embeddings.len(),
+            inputs.len()
+        ));
+    }
+    Ok(parsed.embeddings)
+}
+
 pub async fn list_models() -> Result<Vec<String>> {
     let resp = client()
         .get(format!("{}/api/tags", BASE_URL))
@@ -168,6 +288,7 @@ fn salvage_notes_from_partial(raw: &str) -> Result<GeneratedNotes> {
     let val: Value = serde_json::from_str(strip_json_fences(raw))
         .map_err(|e| anyhow!("salvage parse failed: {}", e))?;
     Ok(GeneratedNotes {
+        key_quotes: Vec::new(),
         title:   val["title"].as_str().unwrap_or("Untitled").to_string(),
         summary: val["summary"].as_str().unwrap_or("").to_string(),
         sections: serde_json::from_value(val["sections"].clone()).unwrap_or_else(|_| {
@@ -176,7 +297,9 @@ fn salvage_notes_from_partial(raw: &str) -> Result<GeneratedNotes> {
         action_items: serde_json::from_value(val["action_items"].clone())
             .unwrap_or_else(|_| Vec::<ActionItem>::new()),
         tags: serde_json::from_value(val["tags"].clone()).unwrap_or_default(),
-    })
+        bullet_anchors: Vec::new(),
+        receipt: None,
+        })
 }
 
 #[cfg(test)]
@@ -210,4 +333,17 @@ mod tests {
 
     // `is_running_blocking` and HTTP-touching tests are intentionally absent —
     // they'd require a live Ollama server, which we can't guarantee in CI.
+}
+
+#[cfg(test)]
+mod ctx_tests {
+    use super::ctx_for_prompt;
+
+    #[test]
+    fn ctx_floors_ceils_and_scales() {
+        assert_eq!(ctx_for_prompt("short"), 4096, "floor");
+        // ~24k chars ≈ 6k tokens + 2k headroom = 8k
+        assert_eq!(ctx_for_prompt(&"x".repeat(24_000)), 8048);
+        assert_eq!(ctx_for_prompt(&"x".repeat(500_000)), 32_768, "ceiling");
+    }
 }

@@ -1,3 +1,8 @@
+// cpal 0.17 deprecates Device::name() in favor of description()/id().
+// The saved "audio_device" setting stores names, so the migration to
+// stable ids is a deliberate follow-up, not a drive-by.
+#![allow(deprecated)]
+
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
@@ -82,7 +87,7 @@ pub fn start_mic_capture(device_name: Option<&str>) -> Result<MicCaptureStart> {
     let actual_device_name = device.name().unwrap_or_else(|_| "<unknown>".to_string());
 
     let config = device.default_input_config()?;
-    let sample_rate = config.sample_rate().0;
+    let sample_rate = config.sample_rate();
     let channels = config.channels() as usize;
 
     let (mut producer, consumer) = create_audio_ring(sample_rate as usize * 10);
@@ -104,15 +109,28 @@ pub fn start_mic_capture(device_name: Option<&str>) -> Result<MicCaptureStart> {
                         return;
                     }
                     if channels == 1 {
-                        let _ = producer.push_slice(data);
+                        let written = producer.push_slice(data);
+                        if written < data.len() {
+                            super::MIC_DROPPED_SAMPLES.fetch_add(
+                                (data.len() - written) as u64,
+                                Ordering::Relaxed,
+                            );
+                        }
                     } else {
                         for chunk in data.chunks(channels) {
                             let mono = chunk.iter().sum::<f32>() / channels as f32;
-                            let _ = producer.try_push(mono);
+                            if producer.try_push(mono).is_err() {
+                                super::MIC_DROPPED_SAMPLES.fetch_add(1, Ordering::Relaxed);
+                            }
                         }
                     }
                 },
-                |err| eprintln!("mic stream error: {}", err),
+                |err| {
+                    // Surfaces DeviceNotAvailable etc. to the mic supervisor
+                    // so it can skip the stall wait (design §1b).
+                    super::MIC_STREAM_ERROR.store(true, Ordering::Relaxed);
+                    log::error!("mic stream error: {}", err);
+                },
                 None,
             ),
             SampleFormat::I16 => device.build_input_stream(
@@ -124,14 +142,21 @@ pub fn start_mic_capture(device_name: Option<&str>) -> Result<MicCaptureStart> {
                     for chunk in data.chunks(channels) {
                         let mono: f32 = chunk.iter().map(|&s| s as f32 / i16::MAX as f32).sum::<f32>()
                             / channels as f32;
-                        let _ = producer.try_push(mono);
+                        if producer.try_push(mono).is_err() {
+                            super::MIC_DROPPED_SAMPLES.fetch_add(1, Ordering::Relaxed);
+                        }
                     }
                 },
-                |err| eprintln!("mic stream error: {}", err),
+                |err| {
+                    // Surfaces DeviceNotAvailable etc. to the mic supervisor
+                    // so it can skip the stall wait (design §1b).
+                    super::MIC_STREAM_ERROR.store(true, Ordering::Relaxed);
+                    log::error!("mic stream error: {}", err);
+                },
                 None,
             ),
             _ => {
-                eprintln!("unsupported sample format: {:?}", sample_format);
+                log::error!("unsupported sample format: {:?}", sample_format);
                 return;
             }
         };
@@ -139,7 +164,7 @@ pub fn start_mic_capture(device_name: Option<&str>) -> Result<MicCaptureStart> {
         match stream {
             Ok(stream) => {
                 if let Err(e) = stream.play() {
-                    eprintln!("failed to play mic stream: {}", e);
+                    log::error!("failed to play mic stream: {}", e);
                     return;
                 }
                 // Keep stream alive until stop_flag is set to false
@@ -149,7 +174,7 @@ pub fn start_mic_capture(device_name: Option<&str>) -> Result<MicCaptureStart> {
                 drop(stream);
             }
             Err(e) => {
-                eprintln!("failed to build mic stream: {}", e);
+                log::error!("failed to build mic stream: {}", e);
             }
         }
     });

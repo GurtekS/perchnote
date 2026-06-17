@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import type { ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Meeting } from "../../lib/ipc";
+import { Meeting, ipc } from "../../lib/ipc";
+import { layoutDayEvents } from "../../lib/calendarLayout";
 import { useUIStore } from "../../stores/uiStore";
 import {
   startOfWeek,
@@ -42,7 +43,9 @@ function hasRecording(m: Meeting): boolean {
   return !!(m.actual_start || m.status === "complete" || m.note_status !== "none");
 }
 
-function eventStyle(m: Meeting): React.CSSProperties {
+/** Grid-relative minutes, clamped the way the renderer draws them — the
+ *  collision layout must see the same boxes the user sees. */
+function eventSpanMins(m: Meeting): { topMin: number; durMin: number } {
   const s = getMeetingStart(m);
   const e = getMeetingEnd(m);
   const startMin = s.getHours() * 60 + s.getMinutes();
@@ -52,6 +55,11 @@ function eventStyle(m: Meeting): React.CSSProperties {
     Math.max(endMin - startMin, 30),
     VISIBLE_HOURS * 60 - topMin
   );
+  return { topMin, durMin };
+}
+
+function eventStyle(m: Meeting): React.CSSProperties {
+  const { topMin, durMin } = eventSpanMins(m);
   return {
     top: `${(topMin / 60) * HOUR_PX}px`,
     height: `${Math.max((durMin / 60) * HOUR_PX, 22)}px`,
@@ -103,9 +111,13 @@ export function WeekView({ meetings, currentDate, emptyState }: WeekViewProps) {
     });
   }
 
-  function handleRecord(id: string) {
+  function handleRecord(id: string, meetingUrl?: string | null) {
     setPopover(null);
-    setPendingAutoStart(true);
+    // Join & Record: open the call link (scheme-allowlisted) on the way in.
+    if (meetingUrl) {
+      ipc.openUrl(meetingUrl).catch(() => {});
+    }
+    setPendingAutoStart(id);
     navigate({ to: "/meeting/$id", params: { id } });
   }
 
@@ -125,7 +137,7 @@ export function WeekView({ meetings, currentDate, emptyState }: WeekViewProps) {
       <div className="h-full overflow-y-auto px-3 py-3 sm:hidden">
         <div className="space-y-3">
           {meetingsByDay.map(({ day, meetings: dayMeetings }) => (
-            <section key={day.toISOString()} className="rounded-lg border border-border bg-bg-secondary p-3">
+            <section key={day.toISOString()} className="card p-3">
               <div className="mb-2 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <h3 className="text-sm font-semibold text-text-primary">
@@ -133,7 +145,7 @@ export function WeekView({ meetings, currentDate, emptyState }: WeekViewProps) {
                   </h3>
                   <p className="text-xs text-text-muted">{format(day, "MMM d")}</p>
                 </div>
-                <span className="shrink-0 rounded-full bg-bg-hover px-2 py-1 text-[11px] font-medium text-text-muted">
+                <span className="shrink-0 rounded-full bg-bg-hover px-2 py-1 text-caption font-medium text-text-muted">
                   {dayMeetings.length} {dayMeetings.length === 1 ? "meeting" : "meetings"}
                 </span>
               </div>
@@ -150,7 +162,7 @@ export function WeekView({ meetings, currentDate, emptyState }: WeekViewProps) {
                       return (
                         <div
                           key={meeting.id}
-                          className="rounded-lg border border-border bg-bg-tertiary p-3"
+                          className="card p-3"
                         >
                           <div className="flex items-start gap-3">
                             <span
@@ -179,7 +191,7 @@ export function WeekView({ meetings, currentDate, emptyState }: WeekViewProps) {
                             {!recorded && (
                               <button
                                 type="button"
-                                onClick={() => handleRecord(meeting.id)}
+                                onClick={() => handleRecord(meeting.id, meeting.meeting_url)}
                                 className="inline-flex min-h-9 flex-1 items-center justify-center gap-2 rounded-lg bg-recording px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-recording/90"
                               >
                                 <span className="h-1.5 w-1.5 rounded-full bg-white" />
@@ -215,11 +227,11 @@ export function WeekView({ meetings, currentDate, emptyState }: WeekViewProps) {
             key={day.toISOString()}
             className="flex-1 flex flex-col items-center py-1.5 gap-0.5"
           >
-            <span className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
+            <span className="text-footnote font-medium uppercase tracking-widest text-text-muted">
               {format(day, "EEE")}
             </span>
             <span
-              className="w-7 h-7 flex items-center justify-center rounded-full text-[13px] font-semibold"
+              className="w-7 h-7 flex items-center justify-center rounded-full text-body-sm font-semibold"
               style={
                 isToday(day)
                   ? { background: "var(--accent)", color: "white" }
@@ -240,7 +252,7 @@ export function WeekView({ meetings, currentDate, emptyState }: WeekViewProps) {
             {hours.map((h) => (
               <div
                 key={h}
-                className="absolute right-2 text-[10px] font-medium text-text-muted"
+                className="absolute right-2 text-footnote font-medium text-text-muted"
                 style={{ top: `${(h - FIRST_HOUR) * HOUR_PX - 7}px` }}
               >
                 {h === 12 ? "12pm" : h < 12 ? `${h}am` : `${h - 12}pm`}
@@ -262,6 +274,11 @@ export function WeekView({ meetings, currentDate, emptyState }: WeekViewProps) {
                 style={{
                   minHeight: `${VISIBLE_HOURS * HOUR_PX}px`,
                   borderLeft: "1px solid var(--glass-header-border)",
+                  // Today's column carries a faint tint (UI review #7) —
+                  // the accent date-circle alone vanished in a full week.
+                  ...(isToday(day)
+                    ? { background: "rgba(var(--accent-rgb), 0.035)" }
+                    : {}),
                 }}
               >
                 {/* Hour lines */}
@@ -306,18 +323,26 @@ export function WeekView({ meetings, currentDate, emptyState }: WeekViewProps) {
                   </div>
                 )}
 
-                {/* Events */}
-                {dayMeetings.map((m) => {
+                {/* Events — overlapping meetings share the column width
+                    side-by-side instead of stacking on top of each other. */}
+                {layoutDayEvents(
+                  dayMeetings,
+                  (m) => eventSpanMins(m).topMin,
+                  (m) => {
+                    const { topMin, durMin } = eventSpanMins(m);
+                    return topMin + durMin;
+                  }
+                ).map(({ item: m, col, cols }) => {
                   const recorded = hasRecording(m);
                   return (
                     <div
                       key={m.id}
                       onClick={(e) => handleEventClick(e, m)}
-                      className="absolute rounded-md px-1.5 py-0.5 cursor-pointer overflow-hidden z-10 transition-all hover:brightness-110"
+                      className="absolute rounded-md px-1.5 py-0.5 cursor-pointer overflow-hidden z-10 transition-all hover:brightness-110 hover:z-20"
                       style={{
                         ...eventStyle(m),
-                        left: "2px",
-                        right: "2px",
+                        left: `calc(${(col / cols) * 100}% + 2px)`,
+                        width: `calc(${100 / cols}% - 4px)`,
                         background: recorded
                           ? "rgba(var(--accent-rgb), 0.22)"
                           : "rgba(var(--accent-rgb), 0.09)",
@@ -333,12 +358,12 @@ export function WeekView({ meetings, currentDate, emptyState }: WeekViewProps) {
                         )}
                         <div className="min-w-0">
                           <p
-                            className="text-[11px] font-medium leading-tight truncate"
+                            className="text-caption font-medium leading-tight truncate"
                             style={{ color: "var(--accent)" }}
                           >
                             {m.title}
                           </p>
-                          <p className="text-[10px] leading-tight" style={{ color: "rgba(var(--accent-rgb),0.6)" }}>
+                          <p className="text-footnote leading-tight" style={{ color: "rgba(var(--accent-rgb),0.6)" }}>
                             {format(getMeetingStart(m), "h:mm a")}
                           </p>
                         </div>
@@ -355,22 +380,18 @@ export function WeekView({ meetings, currentDate, emptyState }: WeekViewProps) {
       {/* Event popover */}
       {popover && (
         <div
-          className="absolute z-50 w-64 rounded-xl shadow-xl p-3 space-y-2.5"
+          className="glass-float absolute z-50 w-64 rounded-xl p-3 space-y-2.5"
           style={{
             left: `${popover.x}px`,
             top: `${popover.y}px`,
-            background: "var(--popup-bg)",
-            border: "1px solid var(--popup-border)",
-            backdropFilter: "blur(20px)",
-            WebkitBackdropFilter: "blur(20px)",
           }}
           onClick={(e) => e.stopPropagation()}
         >
           <div>
-            <p className="text-[13px] font-semibold text-text-primary leading-snug">
+            <p className="text-body-sm font-semibold text-text-primary leading-snug">
               {popover.meeting.title}
             </p>
-            <p className="text-[11px] text-text-muted mt-0.5">
+            <p className="text-caption text-text-muted mt-0.5">
               {format(getMeetingStart(popover.meeting), "EEE, MMM d · h:mm a")}
               {popover.meeting.scheduled_end &&
                 ` – ${format(new Date(popover.meeting.scheduled_end), "h:mm a")}`}
@@ -378,7 +399,7 @@ export function WeekView({ meetings, currentDate, emptyState }: WeekViewProps) {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => handleRecord(popover.meeting.id)}
+              onClick={() => handleRecord(popover.meeting.id, popover.meeting.meeting_url)}
               className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
               style={{ background: "var(--color-recording)" }}
             >

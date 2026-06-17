@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -23,19 +24,13 @@ export function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useFocusTrap(open, dialogRef, onCancel);
 
   useEffect(() => {
     if (open) cancelRef.current?.focus();
   }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [open, onCancel]);
 
   if (!open) return null;
 
@@ -47,7 +42,13 @@ export function ConfirmDialog({
         onClick={onCancel}
       />
       {/* Dialog */}
-      <div className="relative border rounded-xl shadow-2xl max-w-sm w-full mx-4 p-5" style={{ background: "var(--popup-bg)", borderColor: "var(--popup-border)" }}>
+      <div
+        ref={dialogRef}
+        className="glass-float relative rounded-xl max-w-sm w-full mx-4 p-5"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-dialog-title"
+      >
         <div className="flex items-start gap-3 mb-4">
           {variant === "danger" && (
             <div className="shrink-0 w-9 h-9 rounded-full bg-recording/10 flex items-center justify-center">
@@ -55,7 +56,7 @@ export function ConfirmDialog({
             </div>
           )}
           <div>
-            <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+            <h3 id="confirm-dialog-title" className="text-sm font-semibold text-text-primary">{title}</h3>
             <p className="text-sm text-text-secondary mt-1">{message}</p>
           </div>
         </div>
@@ -63,16 +64,16 @@ export function ConfirmDialog({
           <button
             ref={cancelRef}
             onClick={onCancel}
-            className="px-3 py-1.5 text-sm rounded-lg bg-bg-tertiary text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+            className="btn btn-secondary"
           >
             {cancelLabel}
           </button>
           <button
             onClick={onConfirm}
-            className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors ${
+            className={`btn ${
               variant === "danger"
                 ? "bg-recording hover:bg-recording-pulse text-white"
-                : "bg-accent hover:bg-accent-hover text-white"
+                : "btn-primary"
             }`}
           >
             {confirmLabel}

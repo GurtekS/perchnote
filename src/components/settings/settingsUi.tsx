@@ -7,10 +7,18 @@ export const settingsFocusRing =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70";
 
 export const primarySettingsButtonClass =
-  `inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50 ${settingsFocusRing}`;
+  `btn btn-primary btn-lg ${settingsFocusRing}`;
 
 export const secondarySettingsButtonClass =
-  `inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50 ${settingsFocusRing}`;
+  `btn btn-secondary btn-lg ${settingsFocusRing}`;
+
+/* Compact (32px default-.btn) variants for dense rows — replaces the old
+   per-site `min-h-8 px-2.5 py-1 text-xs` overrides. */
+export const primarySettingsButtonCompactClass =
+  `btn btn-primary ${settingsFocusRing}`;
+
+export const secondarySettingsButtonCompactClass =
+  `btn btn-secondary ${settingsFocusRing}`;
 
 export const settingsInputClass =
   `rounded-lg border border-border bg-bg-tertiary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted/50 focus:outline-none focus:border-accent ${settingsFocusRing}`;
@@ -77,7 +85,7 @@ export function SettingsStatusBadge({
 
   return (
     <span
-      className={`inline-flex min-h-6 shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium ${toneClass}`}
+      className={`inline-flex min-h-6 shrink-0 items-center gap-1 rounded-full px-2 py-1 text-caption font-medium ${toneClass}`}
     >
       {isLoading && <Loader2 size={11} className="animate-spin" />}
       {children}

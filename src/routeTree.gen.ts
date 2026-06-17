@@ -9,9 +9,11 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TasksRouteImport } from './routes/tasks'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as MeetingsRouteImport } from './routes/meetings'
+import { Route as InsightsRouteImport } from './routes/insights'
 import { Route as FoldersRouteImport } from './routes/folders'
 import { Route as CalendarRouteImport } from './routes/calendar'
 import { Route as IndexRouteImport } from './routes/index'
@@ -19,6 +21,11 @@ import { Route as FoldersIndexRouteImport } from './routes/folders.index'
 import { Route as MeetingIdRouteImport } from './routes/meeting.$id'
 import { Route as FoldersFolderIdRouteImport } from './routes/folders.$folderId'
 
+const TasksRoute = TasksRouteImport.update({
+  id: '/tasks',
+  path: '/tasks',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -32,6 +39,11 @@ const OnboardingRoute = OnboardingRouteImport.update({
 const MeetingsRoute = MeetingsRouteImport.update({
   id: '/meetings',
   path: '/meetings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InsightsRoute = InsightsRouteImport.update({
+  id: '/insights',
+  path: '/insights',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FoldersRoute = FoldersRouteImport.update({
@@ -69,9 +81,11 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/calendar': typeof CalendarRoute
   '/folders': typeof FoldersRouteWithChildren
+  '/insights': typeof InsightsRoute
   '/meetings': typeof MeetingsRoute
   '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRoute
+  '/tasks': typeof TasksRoute
   '/folders/$folderId': typeof FoldersFolderIdRoute
   '/meeting/$id': typeof MeetingIdRoute
   '/folders/': typeof FoldersIndexRoute
@@ -79,9 +93,11 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/calendar': typeof CalendarRoute
+  '/insights': typeof InsightsRoute
   '/meetings': typeof MeetingsRoute
   '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRoute
+  '/tasks': typeof TasksRoute
   '/folders/$folderId': typeof FoldersFolderIdRoute
   '/meeting/$id': typeof MeetingIdRoute
   '/folders': typeof FoldersIndexRoute
@@ -91,9 +107,11 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/calendar': typeof CalendarRoute
   '/folders': typeof FoldersRouteWithChildren
+  '/insights': typeof InsightsRoute
   '/meetings': typeof MeetingsRoute
   '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRoute
+  '/tasks': typeof TasksRoute
   '/folders/$folderId': typeof FoldersFolderIdRoute
   '/meeting/$id': typeof MeetingIdRoute
   '/folders/': typeof FoldersIndexRoute
@@ -104,9 +122,11 @@ export interface FileRouteTypes {
     | '/'
     | '/calendar'
     | '/folders'
+    | '/insights'
     | '/meetings'
     | '/onboarding'
     | '/settings'
+    | '/tasks'
     | '/folders/$folderId'
     | '/meeting/$id'
     | '/folders/'
@@ -114,9 +134,11 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/calendar'
+    | '/insights'
     | '/meetings'
     | '/onboarding'
     | '/settings'
+    | '/tasks'
     | '/folders/$folderId'
     | '/meeting/$id'
     | '/folders'
@@ -125,9 +147,11 @@ export interface FileRouteTypes {
     | '/'
     | '/calendar'
     | '/folders'
+    | '/insights'
     | '/meetings'
     | '/onboarding'
     | '/settings'
+    | '/tasks'
     | '/folders/$folderId'
     | '/meeting/$id'
     | '/folders/'
@@ -137,14 +161,23 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CalendarRoute: typeof CalendarRoute
   FoldersRoute: typeof FoldersRouteWithChildren
+  InsightsRoute: typeof InsightsRoute
   MeetingsRoute: typeof MeetingsRoute
   OnboardingRoute: typeof OnboardingRoute
   SettingsRoute: typeof SettingsRoute
+  TasksRoute: typeof TasksRoute
   MeetingIdRoute: typeof MeetingIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/tasks': {
+      id: '/tasks'
+      path: '/tasks'
+      fullPath: '/tasks'
+      preLoaderRoute: typeof TasksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -164,6 +197,13 @@ declare module '@tanstack/react-router' {
       path: '/meetings'
       fullPath: '/meetings'
       preLoaderRoute: typeof MeetingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/insights': {
+      id: '/insights'
+      path: '/insights'
+      fullPath: '/insights'
+      preLoaderRoute: typeof InsightsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/folders': {
@@ -228,9 +268,11 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CalendarRoute: CalendarRoute,
   FoldersRoute: FoldersRouteWithChildren,
+  InsightsRoute: InsightsRoute,
   MeetingsRoute: MeetingsRoute,
   OnboardingRoute: OnboardingRoute,
   SettingsRoute: SettingsRoute,
+  TasksRoute: TasksRoute,
   MeetingIdRoute: MeetingIdRoute,
 }
 export const routeTree = rootRouteImport

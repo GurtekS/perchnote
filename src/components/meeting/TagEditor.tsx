@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { X, Plus, Tag } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { ipc, Tag as TagType } from "../../lib/ipc";
 import { toast } from "../../stores/toastStore";
 
@@ -11,6 +12,7 @@ interface TagEditorProps {
 
 export function TagEditor({ meetingId, onEditingChange }: TagEditorProps) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [isAdding, setIsAdding] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -105,7 +107,16 @@ export function TagEditor({ meetingId, onEditingChange }: TagEditorProps) {
           className="group inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-xs text-accent focus-within:ring-1 focus-within:ring-accent/40"
         >
           <Tag size={10} />
-          <span className="max-w-[140px] truncate">{tag.name}</span>
+          {/* Tags read path: the name is the way IN to "everything with
+              this tag" — it used to be inert (deep review P2). */}
+          <button
+            type="button"
+            onClick={() => navigate({ to: "/meetings", search: { tag: tag.name } })}
+            className="max-w-[140px] truncate hover:underline"
+            title={`Show all meetings tagged “${tag.name}”`}
+          >
+            {tag.name}
+          </button>
           <button
             type="button"
             onClick={() => handleRemoveTag(tag.id)}
@@ -137,11 +148,11 @@ export function TagEditor({ meetingId, onEditingChange }: TagEditorProps) {
               }, 300);
             }}
             onFocus={() => setShowSuggestions(true)}
-            placeholder="Tag name..."
+            placeholder="Tag name…"
             className="w-32 px-2 py-0.5 text-xs rounded-full bg-bg-tertiary text-text-primary border border-accent focus:outline-none"
           />
           {showSuggestions && suggestions.length > 0 && (
-            <div className="menu-dropdown-left absolute top-full left-0 mt-1 w-48 border rounded-lg shadow-lg z-10 py-1 max-h-40 overflow-y-auto" style={{ background: "var(--popup-bg)", borderColor: "var(--popup-border)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" }}>
+            <div className="glass-float menu-dropdown-left absolute top-full left-0 mt-1 w-48 rounded-lg z-10 py-1 max-h-40 overflow-y-auto">
               {suggestions.map((tag) => (
                 <button
                   type="button"
@@ -170,7 +181,7 @@ export function TagEditor({ meetingId, onEditingChange }: TagEditorProps) {
         <button
           type="button"
           onClick={() => setIsAdding(true)}
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] text-text-muted hover:text-text-secondary hover:bg-bg-hover transition-colors border border-dashed border-border"
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-caption text-text-muted hover:text-text-secondary hover:bg-bg-hover transition-colors border border-dashed border-border"
           title="Add tag"
         >
           <Plus size={10} />

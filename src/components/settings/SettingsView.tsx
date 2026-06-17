@@ -18,7 +18,9 @@ import { DataSettings } from "./DataSettings";
 import { CalendarSettings } from "./CalendarSettings";
 import { TemplateSettings } from "./TemplateSettings";
 import { NotificationSettings } from "./NotificationSettings";
+import { SHORTCUT_GROUPS } from "../../lib/shortcuts";
 import { AiSettings } from "./AiSettings";
+import { primarySettingsButtonClass } from "./settingsUi";
 
 export const SETTINGS_SECTION_IDS = [
   "general",
@@ -34,26 +36,17 @@ export const SETTINGS_SECTION_IDS = [
 
 export type SettingsSection = (typeof SETTINGS_SECTION_IDS)[number];
 
-const SHORTCUTS = [
-  { keys: "⌘N", description: "New meeting" },
-  { keys: "⌘E", description: "Enhance notes" },
-  { keys: "⌘T", description: "Toggle transcript" },
-  { keys: "⌘K", description: "Command palette" },
-  { keys: "⌘,", description: "Settings" },
-  { keys: "⌘F", description: "Search" },
-  { keys: "Escape", description: "Close / go back" },
-];
 
-const navItems: { id: SettingsSection; label: string; icon: typeof Sun }[] = [
-  { id: "general",   label: "General",   icon: Sun },
-  { id: "setup",     label: "Setup Guide", icon: ListChecks },
-  { id: "ai",        label: "AI",        icon: Sparkles },
-  { id: "calendar",  label: "Calendar",  icon: Calendar },
-  { id: "audio",     label: "Audio",     icon: Mic },
-  { id: "data",      label: "Data",      icon: Database },
-  { id: "templates",      label: "Templates",      icon: FileText },
-  { id: "notifications", label: "Notifications", icon: Bell },
-  { id: "shortcuts",     label: "Shortcuts",     icon: Keyboard },
+const navItems: { id: SettingsSection; label: string; icon: typeof Sun; chip: string }[] = [
+  { id: "general",   label: "General",   icon: Sun,        chip: "chip-gray" },
+  { id: "setup",     label: "Setup Guide", icon: ListChecks, chip: "chip-green" },
+  { id: "ai",        label: "AI",        icon: Sparkles,   chip: "chip-purple" },
+  { id: "calendar",  label: "Calendar",  icon: Calendar,   chip: "chip-red" },
+  { id: "audio",     label: "Audio",     icon: Mic,        chip: "chip-orange" },
+  { id: "data",      label: "Data",      icon: Database,   chip: "chip-blue" },
+  { id: "templates",      label: "Templates",      icon: FileText, chip: "chip-teal" },
+  { id: "notifications", label: "Notifications", icon: Bell,     chip: "chip-indigo" },
+  { id: "shortcuts",     label: "Shortcuts",     icon: Keyboard, chip: "chip-pink" },
 ];
 
 interface SettingsViewProps {
@@ -83,18 +76,20 @@ export function SettingsView({
   return (
     <div className="flex h-full flex-col md:flex-row">
       {/* Sidebar nav */}
-      <nav className="flex w-full shrink-0 gap-0.5 overflow-x-auto border-b border-border px-2 py-3 md:w-44 md:flex-col md:overflow-visible md:border-b-0 md:border-r md:py-4">
-        {navItems.map(({ id, label, icon: Icon }) => (
+      <nav className="flex w-full shrink-0 gap-0.5 overflow-x-auto border-b border-border px-2 py-3 md:w-48 md:flex-col md:overflow-visible md:border-b-0 md:border-r md:py-4">
+        {navItems.map(({ id, label, icon: Icon, chip }) => (
           <button
             key={id}
             onClick={() => handleSectionChange(id)}
-            className={`flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors md:w-full ${
+            className={`flex shrink-0 items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left text-sm transition-colors md:w-full ${
               active === id
-                ? "bg-accent/10 text-accent font-medium"
-                : "text-text-muted hover:text-text-secondary hover:bg-bg-hover"
+                ? "bg-bg-active text-text-primary font-medium"
+                : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
             }`}
           >
-            <Icon size={14} className="shrink-0" />
+            <span className={`icon-chip ${chip}`}>
+              <Icon size={14} />
+            </span>
             {label}
           </button>
         ))}
@@ -163,7 +158,7 @@ function SetupGuidePanel({
         </p>
       </div>
 
-      <section className="rounded-lg border border-border bg-bg-secondary p-4">
+      <section className="card p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-sm font-semibold text-text-primary">Replay onboarding</h3>
@@ -175,7 +170,7 @@ function SetupGuidePanel({
             type="button"
             onClick={onRunSetup}
             disabled={!onRunSetup}
-            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:cursor-not-allowed disabled:opacity-50"
+            className={`${primarySettingsButtonClass} shrink-0`}
           >
             <RotateCw size={14} />
             Replay setup guide
@@ -210,20 +205,27 @@ function SetupGuidePanel({
 }
 
 function ShortcutsPanel() {
+  // Same source of truth as the ⌘/ overlay — this panel had quietly fallen
+  // seven shortcuts behind its sibling (friction audit #13).
   return (
     <div className="space-y-4">
       <div>
         <h2 className="text-base font-semibold text-text-primary mb-0.5">Keyboard Shortcuts</h2>
-        <p className="text-xs text-text-muted">Quick reference for available shortcuts.</p>
+        <p className="text-xs text-text-muted">Also available anywhere with ⌘/.</p>
       </div>
-      <div className="grid gap-y-1.5 md:grid-cols-2 md:gap-x-8">
-        {SHORTCUTS.map((s) => (
-          <div key={s.keys} className="flex min-w-0 items-center justify-between gap-3 border-b border-border/50 py-1.5">
-            <span className="min-w-0 text-sm text-text-secondary">{s.description}</span>
-            <kbd className="shrink-0 rounded border border-border bg-bg-tertiary px-2 py-0.5 font-mono text-[11px] text-text-muted">{s.keys}</kbd>
+      {SHORTCUT_GROUPS.map((g) => (
+        <div key={g.title}>
+          <p className="section-label mb-1.5">{g.title}</p>
+          <div className="grid gap-y-1.5 md:grid-cols-2 md:gap-x-8">
+            {g.items.map(([keys, description]) => (
+              <div key={keys} className="flex min-w-0 items-center justify-between gap-3 border-b border-border/50 py-1.5">
+                <span className="min-w-0 text-sm text-text-secondary">{description}</span>
+                <kbd className="shrink-0 rounded border border-border bg-bg-tertiary px-2 py-0.5 font-mono text-caption text-text-muted">{keys}</kbd>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      ))}
     </div>
   );
 }

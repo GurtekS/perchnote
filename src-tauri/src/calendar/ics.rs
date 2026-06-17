@@ -109,6 +109,7 @@ pub(crate) fn parse_ics_events(ics_text: &str) -> Result<Vec<IcsEvent>> {
     let mut dtend = None;
     let mut location = None;
     let mut description = None;
+    let mut cancelled = false;
 
     for line in unfold_ics_lines(ics_text) {
         let line = line.trim();
@@ -120,9 +121,13 @@ pub(crate) fn parse_ics_events(ics_text: &str) -> Result<Vec<IcsEvent>> {
             dtend = None;
             location = None;
             description = None;
+            cancelled = false;
         } else if line == "END:VEVENT" && in_event {
             in_event = false;
-            if !uid.is_empty() && !summary.is_empty() {
+            // A cancelled event syncing as live kept resurrecting in the
+            // meeting list (whole-app review P2) — the spec says
+            // STATUS:CANCELLED means gone.
+            if !uid.is_empty() && !summary.is_empty() && !cancelled {
                 events.push(IcsEvent {
                     uid: uid.clone(),
                     summary: summary.clone(),
@@ -137,10 +142,12 @@ pub(crate) fn parse_ics_events(ics_text: &str) -> Result<Vec<IcsEvent>> {
                 uid = val.to_string();
             } else if let Some(val) = strip_ics_prop(line, "SUMMARY") {
                 summary = unescape_ics(val);
-            } else if let Some(val) = strip_ics_prop(line, "DTSTART") {
-                dtstart = parse_ics_datetime(val);
-            } else if let Some(val) = strip_ics_prop(line, "DTEND") {
-                dtend = parse_ics_datetime(val);
+            } else if line.starts_with("DTSTART") {
+                dtstart = parse_ics_datetime_with_params(line, "DTSTART");
+            } else if line.starts_with("DTEND") {
+                dtend = parse_ics_datetime_with_params(line, "DTEND");
+            } else if let Some(val) = strip_ics_prop(line, "STATUS") {
+                cancelled = val.trim().eq_ignore_ascii_case("CANCELLED");
             } else if let Some(val) = strip_ics_prop(line, "LOCATION") {
                 location = Some(unescape_ics(val));
             } else if let Some(val) = strip_ics_prop(line, "DESCRIPTION") {
@@ -183,6 +190,32 @@ pub(crate) fn strip_ics_prop<'a>(line: &'a str, prop: &str) -> Option<&'a str> {
         }
     }
     None
+}
+
+/// Parse a DTSTART/DTEND line honoring a TZID parameter (whole-app review
+/// P2: parameters were stripped, so `DTSTART;TZID=America/New_York:…`
+/// parsed as SYSTEM-local time — events from any other timezone landed at
+/// the wrong hour). IANA names resolve via chrono-tz; unknown TZIDs fall
+/// back to the old floating-time behavior rather than dropping the event.
+fn parse_ics_datetime_with_params(line: &str, prop: &str) -> Option<DateTime<Utc>> {
+    let rest = line.strip_prefix(prop)?;
+    let colon = rest.find(':')?;
+    let (params, value) = (&rest[..colon], &rest[colon + 1..]);
+    let tzid = params.split(';').find_map(|p| p.strip_prefix("TZID="));
+    if let Some(tzid) = tzid {
+        let val = value.trim();
+        if val.len() >= 15 && !val.ends_with('Z') {
+            if let (Ok(tz), Ok(ndt)) = (
+                tzid.parse::<chrono_tz::Tz>(),
+                NaiveDateTime::parse_from_str(&val[..15], "%Y%m%dT%H%M%S"),
+            ) {
+                if let Some(dt) = tz.from_local_datetime(&ndt).single() {
+                    return Some(dt.with_timezone(&Utc));
+                }
+            }
+        }
+    }
+    parse_ics_datetime(value)
 }
 
 /// Parse ICS datetime formats: 20260316T140000Z or 20260316T140000 or 20260316
@@ -429,5 +462,18 @@ END:VCALENDAR";
         let ics = "BEGIN:VCALENDAR\r\nEND:VCALENDAR";
         let events = parse_ics_events(ics).unwrap();
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn tzid_and_cancelled_are_honored() {
+        let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:a\r\nSUMMARY:NY Standup\r\nDTSTART;TZID=America/New_York:20260316T140000\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:b\r\nSUMMARY:Dead meeting\r\nSTATUS:CANCELLED\r\nDTSTART:20260316T140000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let events = parse_ics_events(ics).unwrap();
+        assert_eq!(events.len(), 1, "cancelled events must not sync");
+        // 14:00 New York in March (EDT, UTC-4) = 18:00 UTC — NOT the
+        // machine-local interpretation.
+        assert_eq!(
+            events[0].dtstart.unwrap().to_rfc3339(),
+            "2026-03-16T18:00:00+00:00"
+        );
     }
 }

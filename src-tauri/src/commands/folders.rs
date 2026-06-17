@@ -45,6 +45,13 @@ pub fn delete_folder(
 }
 
 #[tauri::command]
+pub fn get_folder_memberships_map(
+    db: State<'_, Database>,
+) -> Result<std::collections::HashMap<String, Vec<String>>, String> {
+    db.get_folder_memberships_map().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn get_meeting_ids_in_folder(
     db: State<'_, Database>,
     folder_id: String,

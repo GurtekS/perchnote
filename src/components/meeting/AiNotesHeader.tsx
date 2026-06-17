@@ -10,7 +10,7 @@ export function AiNotesHeader({ tags }: Props) {
       {cleaned.map((tag) => (
         <li
           key={tag}
-          className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-accent/10 text-accent"
+          className="text-caption font-medium px-2 py-0.5 rounded-full bg-accent/10 text-accent"
         >
           {tag}
         </li>

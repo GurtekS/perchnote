@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { format, isToday, isTomorrow, isYesterday, startOfDay, addDays } from "date-fns";
-import { Meeting } from "../../lib/ipc";
+import { Meeting, ipc } from "../../lib/ipc";
 import { useUIStore } from "../../stores/uiStore";
 import { Mic, FileText } from "lucide-react";
 
@@ -92,7 +92,7 @@ export function AgendaView({ meetings, currentDate, emptyState }: AgendaViewProp
                 }}
               >
                 <span
-                  className="text-[10px] font-semibold uppercase leading-none"
+                  className="text-footnote font-semibold uppercase leading-none"
                   style={{ color: isToday(date) ? "white" : "var(--color-text-muted)", opacity: isToday(date) ? 1 : 0.7 }}
                 >
                   {format(date, "EEE")}
@@ -167,15 +167,18 @@ export function AgendaView({ meetings, currentDate, emptyState }: AgendaViewProp
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            setPendingAutoStart(true);
+                            if (m.meeting_url) {
+                              ipc.openUrl(m.meeting_url).catch(() => {});
+                            }
+                            setPendingAutoStart(m.id);
                             navigate({ to: "/meeting/$id", params: { id: m.id } });
                           }}
-                          className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium text-white transition-colors"
+                          className="flex items-center gap-1 px-2 py-0.5 rounded-md text-caption font-medium text-white transition-colors"
                           style={{ background: "var(--color-accent)" }}
-                          title="Record this meeting"
+                          title={m.meeting_url ? "Open the call link and start recording" : "Record this meeting"}
                         >
                           <Mic size={10} />
-                          Record
+                          {m.meeting_url ? "Join & record" : "Record"}
                         </button>
                       ) : null}
                     </div>

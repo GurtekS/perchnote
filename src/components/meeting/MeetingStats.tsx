@@ -35,17 +35,17 @@ type Tab = "overview" | "speakers" | "timeline" | "topics" | "engagement";
 
 const SPEAKER_ACCENTS = [
   "var(--color-accent)",
-  "#f87171",
-  "#fb923c",
-  "#fbbf24",
-  "#a3e635",
-  "#4ade80",
-  "#2dd4bf",
-  "#22d3ee",
-  "#60a5fa",
-  "#818cf8",
-  "#c084fc",
-  "#f472b6",
+  "var(--viz-red)",
+  "var(--viz-orange)",
+  "var(--viz-amber)",
+  "var(--viz-lime)",
+  "var(--viz-green)",
+  "var(--viz-teal)",
+  "var(--viz-cyan)",
+  "var(--viz-blue)",
+  "var(--viz-indigo)",
+  "var(--viz-purple)",
+  "var(--viz-pink)",
 ];
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
@@ -256,10 +256,10 @@ function engagementLabel(score: number): string {
 }
 
 function engagementColor(score: number): string {
-  if (score >= 75) return "#4ade80";
-  if (score >= 50) return "#fbbf24";
-  if (score >= 30) return "#fb923c";
-  return "#f87171";
+  if (score >= 75) return "var(--score-high)";
+  if (score >= 50) return "var(--score-mid)";
+  if (score >= 30) return "var(--score-low)";
+  return "var(--score-poor)";
 }
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -378,21 +378,23 @@ export function MeetingStats({ meetingId, actualStart, actualEnd, scheduledStart
   ];
 
   return (
-    <div className="mb-5 rounded-xl overflow-hidden"
-      style={{ background: "var(--glass-panel-bg)", border: "1px solid var(--glass-panel-border)" }}>
+    <div
+      className={`mb-4 overflow-hidden ${expanded ? "card" : "rounded-lg"}`}
+    >
 
-      {/* Collapsible header */}
+      {/* Collapsible header — a quiet line at rest (UI review #1), a card
+          only once opened. */}
       <button
         onClick={() => setExpanded(v => !v)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-bg-hover/40 transition-colors"
+        className={`w-full flex items-center justify-between transition-colors hover:bg-bg-hover/40 ${expanded ? "px-4 py-3" : "px-1 py-1.5 rounded-lg"}`}
       >
         <div className="flex items-center gap-2 min-w-0">
           <Clock size={12} className="text-text-muted shrink-0" />
-          <span className="text-[10px] font-semibold uppercase tracking-widest text-text-muted shrink-0">
+          <span className="text-footnote font-semibold uppercase tracking-widest text-text-muted shrink-0">
             Meeting Stats
           </span>
           {!expanded && (
-            <span className="text-[11px] text-text-muted truncate">
+            <span className="text-caption text-text-muted truncate">
               · {fmtMs(durationMs)}
               {totalWords > 0 && ` · ${fmtNum(totalWords)} words`}
               {hasSpeakers && ` · ${speakerStats.length} speaker${speakerStats.length !== 1 ? "s" : ""}`}
@@ -413,7 +415,7 @@ export function MeetingStats({ meetingId, actualStart, actualEnd, scheduledStart
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`px-3 py-2 text-[11px] font-medium transition-colors border-b-2 -mb-px ${
+                className={`px-3 py-2 text-caption font-medium transition-colors border-b-2 -mb-px ${
                   activeTab === tab.id
                     ? "border-accent text-accent"
                     : "border-transparent text-text-muted hover:text-text-secondary"
@@ -481,7 +483,7 @@ export function MeetingStats({ meetingId, actualStart, actualEnd, scheduledStart
                           <span className="text-sm font-semibold text-text-primary truncate max-w-[140px]">{stat.name}</span>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-[11px] text-text-muted">{fmtMs(stat.talkMs)}</span>
+                          <span className="text-caption text-text-muted">{fmtMs(stat.talkMs)}</span>
                           <span className="text-sm font-bold w-9 text-right" style={{ color }}>{stat.pct}%</span>
                         </div>
                       </div>
@@ -523,7 +525,7 @@ export function MeetingStats({ meetingId, actualStart, actualEnd, scheduledStart
                         );
                       })}
                     </div>
-                    <div className="flex justify-between text-[10px] text-text-muted px-0.5">
+                    <div className="flex justify-between text-footnote text-text-muted px-0.5">
                       <span>0:00</span>
                       <span>{fmtMs(durationMs * 0.25)}</span>
                       <span>{fmtMs(durationMs * 0.5)}</span>
@@ -535,14 +537,14 @@ export function MeetingStats({ meetingId, actualStart, actualEnd, scheduledStart
                         <div key={s.name} className="flex items-center gap-1.5">
                           <span className="w-2.5 h-2.5 rounded shrink-0"
                             style={{ background: speakerColor.get(s.name), opacity: 0.8 }} />
-                          <span className="text-[11px] text-text-secondary truncate max-w-[100px]">{s.name}</span>
-                          <span className="text-[10px] text-text-muted">{s.pct}%</span>
+                          <span className="text-caption text-text-secondary truncate max-w-[100px]">{s.name}</span>
+                          <span className="text-footnote text-text-muted">{s.pct}%</span>
                         </div>
                       ))}
                       <div className="flex items-center gap-1.5">
                         <span className="w-2.5 h-2.5 rounded shrink-0"
                           style={{ background: "var(--glass-header-border)", opacity: 0.6 }} />
-                        <span className="text-[11px] text-text-muted">Silence {silencePct}%</span>
+                        <span className="text-caption text-text-muted">Silence {silencePct}%</span>
                       </div>
                     </div>
                   </>
@@ -561,10 +563,10 @@ export function MeetingStats({ meetingId, actualStart, actualEnd, scheduledStart
                       {aiTags ? (
                         <>
                           <Sparkles size={11} className="text-accent shrink-0" />
-                          <span className="text-[10px] text-accent font-medium">From AI notes</span>
+                          <span className="text-footnote text-accent font-medium">From AI notes</span>
                         </>
                       ) : (
-                        <span className="text-[10px] text-text-muted">From transcript · generate notes for AI topics</span>
+                        <span className="text-footnote text-text-muted">From transcript · generate notes for AI topics</span>
                       )}
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -575,7 +577,7 @@ export function MeetingStats({ meetingId, actualStart, actualEnd, scheduledStart
                             className={`px-2.5 py-1 rounded-full border ${
                               isTop
                                 ? "text-xs text-text-primary bg-bg-tertiary border-border/60 font-medium"
-                                : "text-[11px] text-text-secondary bg-bg-tertiary border-border"
+                                : "text-caption text-text-secondary bg-bg-tertiary border-border"
                             }`}>
                             {w}
                           </span>
@@ -599,7 +601,7 @@ export function MeetingStats({ meetingId, actualStart, actualEnd, scheduledStart
                       <div className="flex items-center justify-between mb-1.5">
                         <div className="flex items-center gap-1.5">
                           <Zap size={11} className="text-text-muted" />
-                          <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">
+                          <span className="text-footnote font-medium text-text-muted uppercase tracking-wider">
                             Engagement Score
                           </span>
                         </div>
@@ -613,7 +615,7 @@ export function MeetingStats({ meetingId, actualStart, actualEnd, scheduledStart
                         <div className="h-full rounded-full"
                           style={{ width: `${engagementScore}%`, background: engagementColor(engagementScore) }} />
                       </div>
-                      <p className="text-[10px] text-text-muted mt-1.5">{engagementLabel(engagementScore)}</p>
+                      <p className="text-footnote text-text-muted mt-1.5">{engagementLabel(engagementScore)}</p>
                     </div>
 
                     {/* Metrics */}
@@ -643,7 +645,7 @@ export function MeetingStats({ meetingId, actualStart, actualEnd, scheduledStart
 
                     {/* Factor bars */}
                     <div className="space-y-2 pt-3 border-t border-border/40">
-                      <p className="text-[10px] text-text-muted uppercase tracking-wider font-medium mb-2">Score Breakdown</p>
+                      <p className="text-footnote text-text-muted uppercase tracking-wider font-medium mb-2">Score Breakdown</p>
                       {([
                         {
                           label: "Back-and-forth",
@@ -663,7 +665,7 @@ export function MeetingStats({ meetingId, actualStart, actualEnd, scheduledStart
                         },
                       ] as { label: string; pct: number }[]).map(f => (
                         <div key={f.label}>
-                          <div className="flex justify-between text-[10px] mb-0.5">
+                          <div className="flex justify-between text-footnote mb-0.5">
                             <span className="text-text-secondary">{f.label}</span>
                             <span className="text-text-muted tabular-nums">{f.pct}</span>
                           </div>
@@ -678,7 +680,7 @@ export function MeetingStats({ meetingId, actualStart, actualEnd, scheduledStart
                     {/* Vocab richness */}
                     {speakerStats.some(s => s.vocabRichness > 0) && (
                       <div className="pt-3 border-t border-border/40">
-                        <p className="text-[10px] text-text-muted uppercase tracking-wider font-medium mb-2">
+                        <p className="text-footnote text-text-muted uppercase tracking-wider font-medium mb-2">
                           Vocabulary Richness
                         </p>
                         <div className="space-y-2">
@@ -686,19 +688,19 @@ export function MeetingStats({ meetingId, actualStart, actualEnd, scheduledStart
                             const color = speakerColor.get(stat.name) ?? SPEAKER_ACCENTS[0];
                             return (
                               <div key={stat.name} className="flex items-center gap-2">
-                                <span className="text-[11px] text-text-secondary w-24 truncate shrink-0">{stat.name}</span>
+                                <span className="text-caption text-text-secondary w-24 truncate shrink-0">{stat.name}</span>
                                 <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--glass-header-border)" }}>
                                   <div className="h-full rounded-full"
                                     style={{ width: `${stat.vocabRichness}%`, background: color, opacity: 0.75 }} />
                                 </div>
-                                <span className="text-[10px] text-text-muted w-8 text-right tabular-nums shrink-0">
+                                <span className="text-footnote text-text-muted w-8 text-right tabular-nums shrink-0">
                                   {stat.vocabRichness}%
                                 </span>
                               </div>
                             );
                           })}
                         </div>
-                        <p className="text-[10px] text-text-muted mt-1.5">
+                        <p className="text-footnote text-text-muted mt-1.5">
                           Unique words ÷ total words — higher = more varied vocabulary
                         </p>
                       </div>
@@ -720,7 +722,7 @@ export function MeetingStats({ meetingId, actualStart, actualEnd, scheduledStart
 function StatCell({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
     <div title={title}>
-      <p className="text-[10px] text-text-muted leading-none mb-1">{label}</p>
+      <p className="text-footnote text-text-muted leading-none mb-1">{label}</p>
       <p className="text-sm font-semibold text-text-primary leading-tight">{value}</p>
     </div>
   );
@@ -728,7 +730,7 @@ function StatCell({ label, value, title }: { label: string; value: string; title
 
 function MicroStat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <span className="text-[10px] text-text-muted">
+    <span className="text-footnote text-text-muted">
       <span style={{ color }} className={color ? "font-medium" : ""}>{value}</span>
       {" "}{label}
     </span>
@@ -737,7 +739,7 @@ function MicroStat({ label, value, color }: { label: string; value: string; colo
 
 function InsightPill({ label, faint, warn }: { label: string; faint?: boolean; warn?: boolean }) {
   return (
-    <span className={`text-[11px] ${warn ? "text-amber-400" : faint ? "text-text-muted" : "text-text-secondary"}`}>
+    <span className={`text-caption ${warn ? "text-amber-400" : faint ? "text-text-muted" : "text-text-secondary"}`}>
       {label}
     </span>
   );
