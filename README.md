@@ -34,69 +34,67 @@ the field turns it off).
 
 ## ✨ Features
 
-- **Never miss a recording.** When Zoom, Teams, or your browser starts
-  using the mic, Perchnote offers one-click recording into the calendar
-  event you're in — it checks *which app* uses the mic, never audio.
-- **Recording.** Mic and system audio simultaneously via Core Audio
-  process taps — no bot joins your call, no virtual cable needed.
-  Optional stereo (you left, them right). Or skip recording entirely:
-  drop any audio file — a Voice Memo, an Apple Notes call recording —
-  onto the window and it becomes a fully transcribed meeting.
-- **On-device transcription.** whisper.cpp runs in-process on Metal
-  (no Homebrew required), behind a Silero voice-activity gate with
-  hallucination filters and beam-search decoding. Models from fast
-  Base to Large-v3-Turbo, downloadable in Settings.
+- **Never miss a recording.** When Zoom, Teams, or your browser grabs
+  the mic, Perchnote offers one-click recording into the calendar event
+  you're in — it watches *which app* uses the mic, never the audio.
+- **Capture anything.** Mic and system audio together via Core Audio
+  process taps — no bot, no virtual cable, optional stereo (you left,
+  them right). Or drop any audio file onto the window — a Voice Memo, a
+  call recording — and it becomes a fully transcribed meeting.
+- **On-device transcription.** whisper.cpp in-process on Metal (no
+  Homebrew), behind a Silero voice-activity gate with hallucination
+  filtering and beam search. Models from fast Base to Large-v3-Turbo,
+  downloadable in Settings.
 - **Speaker recognition.** Neural diarization (pyannote-grade, on
-  CoreML) with automatic fallback; one Speakers panel to name, merge,
-  and re-detect — names propagate everywhere instantly.
-- **AI notes you can verify.** Summaries stream live as they're
-  written; the model extracts verbatim quotes before composing; action
-  items and section bullets carry ▸ m:ss chips that replay the cited
-  moment. Ask AI answers cite their sources the same way — [1] chips
-  that play the moment a claim came from. "Catch me up" recaps a live
-  meeting you joined late; Recipes run your saved prompts ("draft the
-  follow-up email") against any meeting. Provider-pluggable:
-  Anthropic, Ollama (qwen3 recommended), or Apple Intelligence — all
-  optional.
-- **Instant recap.** Recordings enhance themselves on completion;
-  "Notes ready — 3 action items" arrives as a notification.
-- **The full task loop.** Cross-meeting rollup with write-back,
-  due-date buckets, snooze that never touches meeting-stated deadlines,
-  stale-item triage (Done/Snooze/Drop), a Monday week-in-review,
-  idempotent Apple Reminders export with completion sync back, and a
-  one-click hand-off to Things.
+  CoreML) that splits turns at the word boundary so fast back-and-forth
+  keeps each speaker. One panel to name, merge, and re-detect — names
+  propagate everywhere instantly.
+- **AI notes you can verify.** Summaries stream live as they're written;
+  the model pulls verbatim quotes first, then composes. Action items and
+  bullets carry ▸ m:ss chips that replay the cited moment, and Ask AI
+  cites its sources the same way. "Catch me up" recaps a call you joined
+  late; Recipes run saved prompts ("draft the follow-up email") against
+  any meeting. Pluggable: Anthropic, Ollama (qwen3 recommended), or
+  Apple Intelligence — all optional.
+- **Instant recap.** Recordings enhance themselves on stop — "Notes
+  ready — 3 action items" arrives as a notification.
+- **The full task loop.** Cross-meeting rollup with write-back, due-date
+  buckets, snooze that never touches meeting-stated deadlines, stale-item
+  triage (Done/Snooze/Drop), a Monday week-in-review, idempotent Apple
+  Reminders export with completion sync-back, and one-click Things
+  hand-off.
 - **Meeting continuity.** Recurring meetings open with last time's
-  summary and a one-click carry-over of unfinished items; templates
-  bind per series; ⌘D flags important moments live and weighs them
-  into the summary.
+  summary and one-click carry-over of unfinished items; templates bind
+  per series; ⌘D flags moments live and weights them in the summary.
 - **Search that finds the moment.** ⌘K searches titles, notes, and
-  transcripts per-sentence — results carry what was said and jump
+  transcripts per sentence — results carry what was said and jump
   playback to it. Filters work everywhere, including Ask AI:
-  `speaker:amy`, `folder:work`, `before:`/`after:` dates,
-  `"exact phrase"`, `budg*`. Misheard a name? Edit any transcript
-  line, or fix it everywhere with find-and-replace — search and
-  citations re-sync.
-  Optional local semantic recall (sqlite-vec + Ollama embeddings)
-  finds meaning, not just keywords. Topic trackers count your terms;
-  talk-balance shows you-vs-them speaking time.
+  `speaker:amy`, `folder:work`, `before:`/`after:` dates, `"exact
+  phrase"`, `budg*`. Misheard a name? Edit any transcript line, or fix
+  it everywhere with find-and-replace — search and citations re-sync.
+  Optional local semantic recall (sqlite-vec, Apple or Ollama
+  embeddings) finds meaning, not just keywords.
+- **Insights.** A monthly read on your meeting load, open-loop trends,
+  topic trackers, and talk-balance (you vs. them) — each measured against
+  your own baseline, with a year-end brag-doc export.
 - **Your data is files when you want it.** Checksummed `.perchnote`
-  backup archives with verified restore; an optional Markdown mirror
-  to Documents/Perchnote (flat, by month, or by folder) that follows
-  your edits, renames, and deletes — frontmatter carries tags, a deep
-  link back, and the recording's path for Dataview.
-- **Automation.** `perchnote://record/start?title=Standup`,
-  `/record/stop`, `/meeting/<id>/transcript`, and `/search?q=` deep
-  links with x-callback-url support — recipes for Shortcuts, Raycast,
-  and Stream Deck in [`docs/SHORTCUTS.md`](./docs/SHORTCUTS.md). Plus a
-  [local read-only MCP server](#-use-with-claude-mcp) so Claude can
-  search your meetings without anything leaving the machine.
+  backup archives with verified restore, and an optional Markdown mirror
+  to Documents/Perchnote (flat, by month, or by folder) that follows your
+  edits, renames, and deletes — frontmatter carries tags, a deep link
+  back, and the recording's path for Dataview.
+- **Automation & MCP.** `perchnote://` deep links (record, stop,
+  transcript, search) with x-callback-url support — recipes for
+  Shortcuts, Raycast, and Stream Deck in
+  [`docs/SHORTCUTS.md`](./docs/SHORTCUTS.md) — plus a local read-only
+  [MCP server](#-use-with-claude-mcp) so Claude can search your meetings
+  with nothing leaving the machine.
 - **Keyboard-first.** ⌘N records instantly, ⌘1–⌘5 switch sections,
   ⌘[/⌘] retrace your path, ⌘K searches everything, ⌘/ shows the rest.
-- **Calendar integration.** Google Calendar OAuth, Microsoft Graph
-  OAuth, or any read-only ICS feed.
+- **Calendar.** Google Calendar OAuth, Microsoft Graph OAuth, or any
+  read-only ICS feed.
 - **Self-maintaining.** Daily database backups, crash recovery that
-  repairs interrupted recordings, a unified rotating log, and an
-  "About You" profile that writes itself from your meeting history.
+  repairs interrupted recordings, a unified rotating log, and an "About
+  You" profile that writes itself from your meeting history.
 
 ## 📋 Requirements
 
@@ -133,7 +131,7 @@ To verify the download, compare against the `.sha256` checksum file
 published next to the DMG on the release page:
 
 ```sh
-shasum -a 256 -c Perchnote_0.1.2_aarch64.dmg.sha256
+shasum -a 256 -c Perchnote_*_aarch64.dmg.sha256
 ```
 
 Apple-silicon Macs only for now (the published asset is `aarch64`).
