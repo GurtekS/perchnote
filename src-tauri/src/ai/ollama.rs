@@ -102,7 +102,7 @@ async fn chat_request(model: &str, prompt: &str, schema: Option<Value>) -> Resul
         .json(&req)
         .send()
         .await
-        .map_err(|e| anyhow!("Ollama is unreachable at {} — is it running? ({})", BASE_URL, e))?;
+        .map_err(|e| anyhow!("Ollama is unreachable at {}. Is it running? ({})", BASE_URL, e))?;
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
     if !status.is_success() {
@@ -137,7 +137,7 @@ pub async fn generate_notes_streaming(
         .json(&req)
         .send()
         .await
-        .map_err(|e| anyhow!("Ollama is unreachable at {} — is it running? ({})", BASE_URL, e))?;
+        .map_err(|e| anyhow!("Ollama is unreachable at {}. Is it running? ({})", BASE_URL, e))?;
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();

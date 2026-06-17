@@ -60,7 +60,7 @@ function RootLayout() {
       [/^\/$/, "Home"],
     ];
     const section = titles.find(([re]) => re.test(currentPath))?.[1] ?? "Perchnote";
-    document.title = section === "Perchnote" ? "Perchnote" : `${section} — Perchnote`;
+    document.title = section === "Perchnote" ? "Perchnote" : `${section} · Perchnote`;
     // Focus the first heading of the new view without scrolling jank.
     const h = document.querySelector<HTMLElement>("main h1, main h2, [data-view-heading]");
     if (h) {
@@ -99,7 +99,7 @@ function RootLayout() {
       const dateStr = new Intl.DateTimeFormat("en-US", {
         month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true,
       }).format(new Date());
-      const m = await ipc.createMeeting(title?.trim() || `Meeting — ${dateStr}`);
+      const m = await ipc.createMeeting(title?.trim() || `Meeting ${dateStr}`);
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
       useUIStore.getState().setPendingAutoStart(m.id);
       navigate({ to: "/meeting/$id", params: { id: m.id } });
@@ -268,7 +268,7 @@ function RootLayout() {
       listen("user-context-generated", () => {
         queryClient.invalidateQueries({ queryKey: ["setting", "user_context"] });
         queryClient.invalidateQueries({ queryKey: ["setting", "user_context_auto"] });
-        toast.info("Updated “About You” from your meetings — review it in Settings");
+        toast.info("Updated “About You” from your meetings. Review it in Settings.");
       }),
       // perchnote:// deep links (plan v8 B5) — Raycast/Shortcuts/etc. The
       // backend parses every verb into one wire-shaped payload.
@@ -332,7 +332,7 @@ function RootLayout() {
         void (async () => {
           try {
             const meeting = await ipc.getMeeting(e.payload.meeting_id);
-            if (!meeting?.title.startsWith("Voice note — ")) return;
+            if (!meeting?.title.startsWith("Voice note ")) return;
             const t = await ipc.getTranscriptByMeeting(e.payload.meeting_id);
             if (!t) return;
             const segments: Array<{ text?: string }> = JSON.parse(t.segments);
@@ -383,7 +383,7 @@ function RootLayout() {
         })();
       }),
       // Self-titling for placeholder meetings: the backend swapped
-      // "Untitled Meeting" / "Meeting — <timestamp>" for a short transcript
+      // "Untitled Meeting" / "Meeting <timestamp>" for a short transcript
       // descriptor. Refresh, re-mirror under the new name, offer Undo.
       listen<{ meeting_id: string; title: string; previous_title: string }>(
         "meeting-retitled",
@@ -465,7 +465,7 @@ function RootLayout() {
         if (audio.length === 0) return;
         for (const p of audio) {
           const name = p.split("/").pop() ?? p;
-          toast.info(`Importing “${name}” — transcribing in the background`);
+          toast.info(`Importing “${name}”. Transcribing in the background.`);
           try {
             const id = await ipc.importAudioFile(p);
             queryClient.invalidateQueries({ queryKey: ["meetings"] });
@@ -573,7 +573,7 @@ function RootLayout() {
               Drop to import as a meeting
             </p>
             <p className="mt-1 text-xs text-text-muted">
-              Converted, transcribed, and searchable — all on this Mac.
+              Converted, transcribed, and searchable, all on this Mac.
             </p>
           </div>
         </div>

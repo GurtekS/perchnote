@@ -122,7 +122,7 @@ export function AudioSettings() {
     queryClient.invalidateQueries({ queryKey: ["setting", "stereo_recording"] });
     toast.success(
       on
-        ? "Stereo from your next recording — you left, them right"
+        ? "Stereo from your next recording: you left, them right"
         : "Back to mono from your next recording",
     );
   };
@@ -139,7 +139,7 @@ export function AudioSettings() {
     toast.success(
       on
         ? "Recordings get a full-quality re-decode after they finish"
-        : "Accuracy pass off — transcripts keep the live decode",
+        : "Accuracy pass off. Transcripts keep the live decode",
     );
   };
 
@@ -154,8 +154,8 @@ export function AudioSettings() {
     queryClient.invalidateQueries({ queryKey: ["setting", "auto_diarize"] });
     toast.success(
       on
-        ? "Speakers are detected — and named from your voice profiles — after each recording"
-        : "Automatic speaker detection off — use Re-detect in the Speakers panel",
+        ? "Speakers are detected (and named from your voice profiles) after each recording"
+        : "Automatic speaker detection off. Use Re-detect in the Speakers panel",
     );
   };
 
@@ -261,7 +261,7 @@ export function AudioSettings() {
     const { removeCorrectionRule } = await import("../../lib/correctionRules");
     await removeCorrectionRule(find);
     queryClient.invalidateQueries({ queryKey: ["correction-rules"] });
-    toast.success("Rule removed — future transcripts keep the raw wording");
+    toast.success("Rule removed. Future transcripts keep the raw wording");
   };
 
   const vocabDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -477,9 +477,9 @@ export function AudioSettings() {
           </select>
           <p className="text-xs text-text-muted mt-1.5">
             {transcriptionEngine === "apple"
-              ? "Apple's on-device engine — instant, no model download. Applies to imports and re-transcription in this version; live transcription still uses the Whisper model below."
+              ? "Apple's on-device engine: instant, no model download. Applies to imports and re-transcription in this version; live transcription still uses the Whisper model below."
               : speechEngineAvailable
-                ? "Whisper runs fully on-device with the model below. Apple Speech (beta) is also available on this Mac — zero download, much faster for imports and re-transcription."
+                ? "Whisper runs fully on-device with the model below. Apple Speech (beta) is also available on this Mac, with zero download and much faster imports and re-transcription."
                 : "Whisper runs fully on-device with the model below. Apple Speech requires macOS 26 or later."}
           </p>
         </div>
@@ -623,7 +623,7 @@ export function AudioSettings() {
               <span className="text-sm font-medium text-text-primary">Capture system audio</span>
               <p className="text-xs text-text-muted mt-0.5">
                 Record audio playing on your Mac (requires Screen Recording permission).
-                {captureSystemAudio === false && " If prompted, grant access in System Settings — macOS will restart the app automatically."}
+                {captureSystemAudio === false && " If prompted, grant access in System Settings. macOS will restart the app automatically."}
               </p>
             </div>
             <Toggle label="Capture system audio" enabled={captureSystemAudio} onChange={handleCaptureSystemAudioToggle} />
@@ -650,7 +650,7 @@ export function AudioSettings() {
           {captureSystemAudio && hasSystemAudioPermission === true && (
             <p className="px-3 text-xs text-text-muted">
               <Check size={12} className="inline -mt-0.5 mr-1 text-green-500" />
-              Screen Recording permission granted — system audio will be captured.
+              Screen Recording permission granted. System audio will be captured.
             </p>
           )}
 
@@ -668,7 +668,7 @@ export function AudioSettings() {
             <div className="flex-1 min-w-0">
               <span className="text-sm font-medium text-text-primary">Stereo recording</span>
               <p className="text-xs text-text-muted mt-0.5">
-                Your mic on the left channel, everyone else on the right — playback you can
+                Your mic on the left channel, everyone else on the right, playback you can
                 lateralize. Applies from the next recording; live transcription is
                 unaffected, and stereo files downmix automatically when re-transcribed.
               </p>
@@ -697,7 +697,7 @@ export function AudioSettings() {
               <span className="text-sm font-medium text-text-primary">Accuracy pass</span>
               <p className="text-xs text-text-muted mt-0.5">
                 After a recording finishes, re-transcribe the whole file in the
-                background with full context — better punctuation and fewer
+                background with full context, for better punctuation and fewer
                 misheard words. Your edits always win if they land first.
               </p>
             </div>
@@ -713,7 +713,7 @@ export function AudioSettings() {
               <p className="text-xs text-text-muted mt-0.5">
                 After a recording finishes, separate who said what in the
                 background. Voices that clearly match a saved voice profile are
-                named for you — with an Undo. Needs the speaker models (first
+                named for you, with an Undo. Needs the speaker models (first
                 Re-detect downloads them); all matching stays on this Mac.
               </p>
             </div>
@@ -784,7 +784,7 @@ export function AudioSettings() {
       <section>
         <SettingsSubsectionHeader
           title="Voice Activity Filter"
-          description="A tiny on-device model (~1 MB) that screens out non-speech audio before transcription — fewer phantom phrases from keyboard noise, music, and silence."
+          description="A tiny on-device model (~1 MB) that screens out non-speech audio before transcription, for fewer phantom phrases from keyboard noise, music, and silence."
         />
         {vadReady ? (
           <InlineSettingsStatus tone="ok" title="Active" message="Non-speech audio is filtered out before transcription" />
@@ -804,7 +804,7 @@ export function AudioSettings() {
       <section>
         <SettingsSubsectionHeader
           title="Topic Trackers"
-          description="Terms to track across every transcript — pricing, a project name, a competitor. They appear as clickable counters in the transcript drawer. Comma-separated."
+          description="Terms to track across every transcript: pricing, a project name, a competitor. They appear as clickable counters in the transcript drawer. Comma-separated."
         />
         <textarea
           key={savedTopicTrackers}
@@ -820,7 +820,7 @@ export function AudioSettings() {
       <section>
         <SettingsSubsectionHeader
           title="Call Detection"
-          description="Get a nudge when a meeting app starts using your microphone and you're not recording. Only which app uses the mic is checked — never any audio."
+          description="Get a nudge when a meeting app starts using your microphone and you're not recording. Only which app uses the mic is checked, never any audio."
         />
         <label className="flex items-start gap-2.5 cursor-pointer">
           <input
@@ -903,7 +903,7 @@ function SpeakerProfilesSection() {
     setSelected(failed);
     setBulkBusy(false);
     if (failed.size > 0) {
-      toast.error(`${ok} deleted — ${failed.size} couldn't be removed (still selected)`);
+      toast.error(`${ok} deleted. ${failed.size} couldn't be removed (still selected)`);
     } else {
       toast.success(`${ok} voice profile${ok === 1 ? "" : "s"} deleted`);
     }
@@ -1058,7 +1058,7 @@ function RecordVoiceDialog({ onClose, onSaved }: { onClose: () => void; onSaved:
       setCountdown(remaining);
       // Spoken progress for the visual-only "Recording... Ns" row. Every
       // second would be chatty over a 5s clip, so: start + final 3 ticks.
-      announce("Recording voice sample — 5 seconds. Speak normally.");
+      announce("Recording voice sample, 5 seconds. Speak normally.");
 
       intervalRef.current = setInterval(async () => {
         remaining--;
@@ -1089,7 +1089,7 @@ function RecordVoiceDialog({ onClose, onSaved }: { onClose: () => void; onSaved:
           audioCtx.close();
 
           setState("saving");
-          announce("Recording finished — saving voice profile…");
+          announce("Recording finished. Saving voice profile…");
           try {
             await ipc.saveVoiceProfile(name.trim(), Array.from(resampled));
             toast.success(`Voice profile "${name.trim()}" saved`);

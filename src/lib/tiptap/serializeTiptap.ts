@@ -99,7 +99,7 @@ function serializeBlock(node: Node, depth: number): string {
     case "paragraph":
       return inline(node.content);
     case "summary":
-      return `> **Summary** — ${inline(node.content)}`;
+      return `> **Summary:** ${inline(node.content)}`;
     case "actionItem": {
       const a = node.attrs ?? {};
       const done = a.done === true;

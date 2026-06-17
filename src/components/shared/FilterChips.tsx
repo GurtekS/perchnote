@@ -22,7 +22,7 @@ export function FilterChips({
       {chips.map((chip) => (
         <span
           key={chip.key}
-          title={chip.valid ? `Filtering by ${chip.key}` : "Ignored — dates must be YYYY-MM-DD"}
+          title={chip.valid ? `Filtering by ${chip.key}` : "Ignored: dates must be YYYY-MM-DD"}
           className={`inline-flex items-center gap-1 rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-footnote ${
             chip.valid ? "text-text-secondary" : "text-text-muted line-through"
           }`}

@@ -417,7 +417,7 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
     listen<{ meeting_id: string }>("meeting-discarded", (e) => {
       if (e.payload.meeting_id !== meetingId) return;
       setReviewMode(false);
-      toast.info("Empty recording discarded — no audio was captured");
+      toast.info("Empty recording discarded. No audio was captured.");
       navigate({ to: "/" });
     }).then((fn) => { unlisten = fn; }).catch(() => {});
     return () => { unlisten?.(); };
@@ -763,19 +763,19 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
           <AlertCircle size={12} className="shrink-0 text-amber-500" />
           <span className="text-xs font-medium text-amber-500">
             {captureHealth.mixer === "dead"
-              ? "Audio capture stopped — stop and restart the recording. Audio up to now is saved."
+              ? "Audio capture stopped. Stop and restart the recording. Audio up to now is saved."
               : [
                   captureHealth.mic === "stalled"
-                    ? "Mic silent — check the input device"
+                    ? "Mic silent: check the input device"
                     : captureHealth.mic === "rebuilding"
-                    ? "Mic silent — reconnecting…"
+                    ? "Mic silent, reconnecting…"
                     : null,
                   captureHealth.system === "permission_lost"
-                    ? "Screen Recording revoked — participants' audio is no longer captured"
+                    ? "Screen Recording revoked. Participants' audio is no longer captured."
                     : captureHealth.system === "silent"
-                    ? "No system audio for a while — if the call isn't just quiet, participants may not be captured"
+                    ? "No system audio for a while. If the call isn't just quiet, participants may not be captured."
                     : captureHealth.system === "stalled"
-                    ? "System audio stopped — attempting recovery"
+                    ? "System audio stopped, attempting recovery"
                     : captureHealth.system === "rebuilding"
                     ? "Rebuilding system audio capture…"
                     : null,
@@ -799,7 +799,7 @@ export function MeetingView({ meetingId }: MeetingViewProps) {
         >
           <AlertCircle size={12} className="shrink-0 text-recording" />
           <span className="text-xs font-medium text-recording">
-            {transcriptionStatus} — audio is still being recorded and can be
+            {transcriptionStatus}. Audio is still being recorded and can be
             transcribed later from Settings → Audio.
           </span>
         </div>

@@ -75,13 +75,13 @@ export function PostRecordingScreen({
     ? "Notes ready"
     : "Recording saved";
   const subtext = segmentCount === 0
-    ? "Nothing was transcribed — the meeting may have been silent, or transcription wasn't running (check the transcription model in Settings → Audio). The audio is saved and can be re-transcribed."
+    ? "Nothing was transcribed. The meeting may have been silent, or transcription wasn't running (check the transcription model in Settings → Audio). The audio is saved and can be re-transcribed."
     : ready
-    ? "Your AI notes are ready — review or edit them."
+    ? "Your AI notes are ready. Review or edit them."
     : generating
-    ? "Writing your AI notes automatically — they'll be ready in a moment."
+    ? "Writing your AI notes automatically. They'll be ready in a moment."
     : pendingTimedOut
-    ? "Automatic notes didn't finish — you can generate them now."
+    ? "Automatic notes didn't finish. You can generate them now."
     : "Review the transcript now or generate AI notes from this recording.";
 
   return (

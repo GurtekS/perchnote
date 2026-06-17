@@ -198,7 +198,7 @@ export function GeneralSettings() {
       <section>
         <h3 className="text-sm font-semibold text-text-primary mb-1">Updates</h3>
         <p className="text-xs text-text-muted mb-2">
-          Checks GitHub for a newer release when you ask — nothing runs
+          Checks GitHub for a newer release when you ask. Nothing runs
           automatically and nothing is sent beyond the request itself.
         </p>
         <button

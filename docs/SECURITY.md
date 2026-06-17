@@ -15,14 +15,14 @@ within 72 hours.
 The app is a single-user local desktop application. The realistic threats
 we design against are:
 
-1. **Filesystem-level compromise of the user's machine** — malware or a
+1. **Filesystem-level compromise of the user's machine.** Malware or a
    stolen Time Machine backup reads the app's SQLite database.
-2. **Hostile content inside a meeting** — a participant reads malicious
+2. **Hostile content inside a meeting.** A participant reads malicious
    instructions out loud (prompt injection) or a calendar invite contains
    a malicious URL.
-3. **Hostile content inside an ICS feed** — the URL the user pasted is
+3. **Hostile content inside an ICS feed.** The URL the user pasted is
    attacker-controlled and tries to SSRF into the local network.
-4. **Supply-chain compromise** — a malicious npm/cargo dependency tries
+4. **Supply-chain compromise.** A malicious npm/cargo dependency tries
    to exfiltrate credentials.
 
 Out of scope (for now):
@@ -102,7 +102,7 @@ The TipTap `Link` extension is configured with `protocols: ["http",
 
 `src-tauri/src/ai/prompts.rs::SYSTEM_PREAMBLE` instructs the model to
 treat content between `<<<TRANSCRIPT>>>` / `<<<USER_NOTES>>>` fences as
-untrusted *data*, never as instructions. This is best-effort — see
+untrusted *data*, never as instructions. This is best-effort; see
 [OWASP LLM01 (2025)](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)
 for why no full mitigation exists today.
 
@@ -119,7 +119,7 @@ opened with SQLite's `SQLITE_OPEN_READ_ONLY` flag
 level, never runs migrations or backups, and refuses to open a database
 whose schema version doesn't match the binary. What it exposes: meeting
 titles/dates/status/folders/tags, note text, transcripts with the user's
-speaker labels, open action items, and — when a recording exists — the
+speaker labels, open action items, and (when a recording exists) the
 recording's local filesystem path (the path only; the server never opens
 or streams audio, and the client is a local process the user configured).
 What it never exposes: calendar attendee data (the `attendees` column is

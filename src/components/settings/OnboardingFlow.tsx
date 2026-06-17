@@ -97,7 +97,7 @@ const ONBOARDING_STEPS: OnboardingStep[] = [
     id: "test",
     label: "Test",
     title: "Prove the pipeline",
-    description: "Record five seconds of your voice and watch it transcribe — the same path every real meeting uses.",
+    description: "Record five seconds of your voice and watch it transcribe, the same path every real meeting uses.",
     icon: Mic,
   },
   {
@@ -513,7 +513,7 @@ export function OnboardingFlow({
       setScreenStatus("requested");
       void refetchScreenPermission();
       if (granted) {
-        toast.success("Screen Recording granted — restart Perchnote before your first recording");
+        toast.success("Screen Recording granted. Restart Perchnote before your first recording");
       } else {
         toast.info(
           "Enable Perchnote under System Settings → Privacy & Security → Screen Recording, then restart the app",
@@ -558,7 +558,7 @@ export function OnboardingFlow({
   // path into a real (then soft-deleted) meeting and show the first segment.
   const handleTestStart = async () => {
     if (isPreview) {
-      setTestTranscript("Preview mode — transcription runs on real recordings.");
+      setTestTranscript("Preview mode. Transcription runs on real recordings.");
       setTestStatus("done");
       return;
     }
@@ -956,7 +956,7 @@ function AudioStep({
           <InlineIssue
             className="mt-3"
             title="Microphone permission check failed"
-            message={`${error} — if you denied access, enable Perchnote under System Settings → Privacy & Security → Microphone, then try again.`}
+            message={`${error}. If you denied access, enable Perchnote under System Settings → Privacy & Security → Microphone, then try again.`}
           />
         )}
 
@@ -1003,7 +1003,7 @@ function AudioStep({
               className={`${PRIMARY_BUTTON_CLASS} min-w-[222px] disabled:opacity-60`}
             >
               {screenStatus === "checking" ? <Loader2 size={14} className="animate-spin" /> : <MonitorSpeaker size={14} />}
-              {screenStatus === "requested" ? "Requested — restart to apply" : "Request Screen Recording"}
+              {screenStatus === "requested" ? "Requested (restart to apply)" : "Request Screen Recording"}
             </button>
             <p className="text-xs text-text-muted">Skip to record mic-only; you can grant this later.</p>
           </div>
@@ -1517,14 +1517,14 @@ function ImportTeaser() {
     <div className="rounded-lg border border-dashed border-border bg-bg-tertiary/50 p-4">
       <h3 className="text-sm font-semibold text-text-primary">Have a recording already?</h3>
       <p className="mt-1 text-sm text-text-secondary">
-        Drop a Voice Memo or call recording anywhere on this window — it becomes a
+        Drop a Voice Memo or call recording anywhere on this window and it becomes a
         transcribed, searchable meeting, all on this Mac. It&apos;ll be waiting when
         you finish setup.
       </p>
       {importState && (
         <p className="mt-2 text-xs text-accent" role="status">
           {importState.status === "complete"
-            ? `✓ Imported “${importState.title}” — it's in your meeting list`
+            ? `✓ Imported “${importState.title}”. It's in your meeting list`
             : `Importing “${importState.title}” (${importState.status})…`}
         </p>
       )}

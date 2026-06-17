@@ -116,7 +116,7 @@ export function WeekReviewCard({ items, meetings, today, onReviewStale }: Props)
                 onClick={onReviewStale}
                 className="text-amber-500 hover:underline"
               >
-                {openStale} older — review
+                {openStale} older, review
               </button>
             ) : (
               "0 older"

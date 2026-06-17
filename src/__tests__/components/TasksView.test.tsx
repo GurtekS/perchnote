@@ -266,7 +266,7 @@ describe("TasksView", () => {
       closeWeekReviewIfOpen();
       fireEvent.click(screen.getByRole("button", { name: "Week review" }));
 
-      fireEvent.click(screen.getByRole("button", { name: /older — review/ }));
+      fireEvent.click(screen.getByRole("button", { name: /older, review/ }));
 
       expect(triagePanel()).toBeInTheDocument();
       expect(weekCard()).toBeNull();

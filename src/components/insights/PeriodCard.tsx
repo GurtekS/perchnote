@@ -106,8 +106,8 @@ export function PeriodCard({ today }: { today: string }) {
                 What the AI saw
               </summary>
               <p className="mt-2 mb-1 text-footnote">
-                The narrative was generated from only these numbers and titles —
-                no transcripts, no notes:
+                The narrative was generated from only these numbers and titles.
+                No transcripts, no notes:
               </p>
               <pre className="m-0 max-h-48 overflow-auto rounded-lg bg-bg-primary/60 p-2 text-footnote leading-snug">
                 {prettyFacts}
@@ -119,8 +119,8 @@ export function PeriodCard({ today }: { today: string }) {
         <>
           <p className="m-0 text-sm text-text-secondary">
             A few honest paragraphs on the arc of your {label}: how it ramped,
-            what recurred, what moved. Built from counts and titles only —
-            your transcripts and notes are never sent.
+            what recurred, what moved. Built from counts and titles only.
+            Your transcripts and notes are never sent.
           </p>
           <button
             type="button"
@@ -168,7 +168,7 @@ export function PeriodCard({ today }: { today: string }) {
           Export brag doc
         </button>
         <span className="text-footnote text-text-muted">
-          Markdown of your completed items to the Desktop — no AI, just facts.
+          Markdown of your completed items to the Desktop. No AI, just facts.
         </span>
       </div>
     </section>

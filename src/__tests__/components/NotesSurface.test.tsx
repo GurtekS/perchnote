@@ -138,7 +138,7 @@ describe("Last time card", () => {
     });
     render(<NotesSurface {...baseProps} isEnhanced={false} enhancedContent={undefined} />);
 
-    expect(await screen.findByText(/Last time — Weekly Sync/)).toBeInTheDocument();
+    expect(await screen.findByText(/Last time: Weekly Sync/)).toBeInTheDocument();
     expect(screen.getByText("2026-06-02")).toBeInTheDocument();
     expect(screen.getByText("Agreed to ship the beta on Friday.")).toBeInTheDocument();
     expect(screen.getByText("Send the beta invite list")).toBeInTheDocument();
@@ -147,7 +147,7 @@ describe("Last time card", () => {
 
   it("renders no card once the meeting is enhanced", () => {
     render(<NotesSurface {...baseProps} />);
-    expect(screen.queryByText(/Last time —/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Last time:/)).not.toBeInTheDocument();
   });
 
   it("carries open items into this note as a checklist, not actionItems", async () => {

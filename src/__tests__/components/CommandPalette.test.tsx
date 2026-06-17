@@ -317,7 +317,7 @@ describe("CommandPalette grouped search", () => {
   });
 
   it("Quick Voice Note creates the tagged meeting, arms auto-start, and navigates", async () => {
-    ipcMock.createMeeting.mockResolvedValue(meeting({ id: "m-voice", title: "Voice note — x" }));
+    ipcMock.createMeeting.mockResolvedValue(meeting({ id: "m-voice", title: "Voice note x" }));
     ipcMock.listTags.mockResolvedValue([]);
     ipcMock.createTag.mockResolvedValue({ id: "t1", name: "voice-note" });
     ipcMock.addTagToMeeting.mockResolvedValue(undefined);
@@ -329,7 +329,7 @@ describe("CommandPalette grouped search", () => {
     await waitFor(() =>
       expect(navigateMock).toHaveBeenCalledWith({ to: "/meeting/$id", params: { id: "m-voice" } }),
     );
-    expect(ipcMock.createMeeting.mock.calls[0][0]).toMatch(/^Voice note — /);
+    expect(ipcMock.createMeeting.mock.calls[0][0]).toMatch(/^Voice note /);
     expect(ipcMock.addTagToMeeting).toHaveBeenCalledWith("m-voice", "t1");
     expect(useUIStore.getState().pendingAutoStart).toBe("m-voice");
     useUIStore.getState().setPendingAutoStart(null);

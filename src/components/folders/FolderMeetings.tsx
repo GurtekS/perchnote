@@ -46,9 +46,9 @@ function groupByDate(meetings: Meeting[]) {
 function getDuration(m: Meeting): string {
   const start = m.actual_start || m.scheduled_start;
   const end = m.actual_end || m.scheduled_end;
-  if (!start || !end) return "—";
+  if (!start || !end) return "–";
   const mins = Math.round((new Date(end).getTime() - new Date(start).getTime()) / 60000);
-  if (mins <= 0) return "—";
+  if (mins <= 0) return "–";
   if (mins < 60) return `${mins}m`;
   return `${Math.floor(mins / 60)}h${mins % 60 > 0 ? ` ${mins % 60}m` : ""}`;
 }
@@ -56,22 +56,22 @@ function getDuration(m: Meeting): string {
 function getAttendeeList(m: Meeting): string {
   try {
     const arr = JSON.parse(m.attendees || "[]");
-    if (!Array.isArray(arr) || arr.length === 0) return "—";
+    if (!Array.isArray(arr) || arr.length === 0) return "–";
     const names = arr.slice(0, 3).map((a: { name?: string; email?: string }) => a.name || a.email || "").filter(Boolean);
     return names.join(", ") + (arr.length > 3 ? ` +${arr.length - 3}` : "");
-  } catch { return "—"; }
+  } catch { return "–"; }
 }
 
 function getColumnValue(m: Meeting, col: ColumnId): string {
   const dateStr = m.scheduled_start || m.actual_start || m.created_at;
   const d = dateStr ? new Date(dateStr) : null;
   switch (col) {
-    case "date":      return d ? format(d, "MMM d, yyyy") : "—";
-    case "time":      return d ? format(d, "h:mm a") : "—";
+    case "date":      return d ? format(d, "MMM d, yyyy") : "–";
+    case "time":      return d ? format(d, "h:mm a") : "–";
     case "duration":  return getDuration(m);
     case "attendees": return getAttendeeList(m);
-    case "location":  return m.location || "—";
-    case "platform":  return m.platform || "—";
+    case "location":  return m.location || "–";
+    case "platform":  return m.platform || "–";
   }
 }
 

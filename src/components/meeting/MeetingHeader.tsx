@@ -423,7 +423,7 @@ export function MeetingHeader({
                       onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--glass-search-border)"; }}
                       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--glass-search-bg)"; }}
                       aria-label={`Open folder ${f.name}`}
-                      title={`Open “${f.name}” — ⌘[ comes back here`}
+                      title={`Open “${f.name}” (⌘[ comes back here)`}
                     >
                       <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: folderColorFromId(f.id, accentColor) }} />
                       <span className="truncate">{f.name}</span>
@@ -499,7 +499,7 @@ export function MeetingHeader({
             <button
               type="button"
               onClick={() => setRecipesOpen(true)}
-              title="Recipes — run a saved prompt on this meeting"
+              title="Recipes: run a saved prompt on this meeting"
               aria-label="Open recipes"
               className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
             >

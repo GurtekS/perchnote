@@ -45,17 +45,17 @@ export const slashCommandItems: SlashCommandItem[] = [
     command: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleCodeBlock().run(),
   },
   {
-    label: "Callout — info", description: "Highlighted box (blue)", aliases: ["info", "note"],
+    label: "Callout (info)", description: "Highlighted box (blue)", aliases: ["info", "note"],
     command: ({ editor, range }) =>
       editor.chain().focus().deleteRange(range).wrapIn("callout", { variant: "info" }).run(),
   },
   {
-    label: "Callout — warn", description: "Highlighted box (yellow)", aliases: ["warn", "warning"],
+    label: "Callout (warn)", description: "Highlighted box (yellow)", aliases: ["warn", "warning"],
     command: ({ editor, range }) =>
       editor.chain().focus().deleteRange(range).wrapIn("callout", { variant: "warn" }).run(),
   },
   {
-    label: "Callout — tip", description: "Highlighted box (green)", aliases: ["tip"],
+    label: "Callout (tip)", description: "Highlighted box (green)", aliases: ["tip"],
     command: ({ editor, range }) =>
       editor.chain().focus().deleteRange(range).wrapIn("callout", { variant: "tip" }).run(),
   },

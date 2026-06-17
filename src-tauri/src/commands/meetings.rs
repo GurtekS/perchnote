@@ -247,7 +247,7 @@ fn guard_not_recording(app: &AppHandle, id: &str) -> Result<(), String> {
         .filter(|r| r.is_recording)
         .and_then(|r| r.meeting_id.clone());
     if active.as_deref() == Some(id) {
-        return Err("This meeting is recording — stop the recording first.".to_string());
+        return Err("This meeting is recording. Stop the recording first.".to_string());
     }
     Ok(())
 }

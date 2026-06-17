@@ -73,12 +73,12 @@ pub async fn generate_monthly_narrative(
 ) -> Result<CachedInsight, String> {
     let month = month.unwrap_or_else(current_month);
     if !ai::is_configured(&db) {
-        return Err("No AI provider configured — set one up in Settings → AI.".into());
+        return Err("No AI provider configured. Set one up in Settings → AI.".into());
     }
 
     let facts = db.narrative_facts(&month).map_err(|e| e.to_string())?;
     if facts.get("meetings").and_then(|v| v.as_u64()).unwrap_or(0) == 0 {
-        return Err("No completed meetings this month yet — nothing to reflect on.".into());
+        return Err("No completed meetings this month yet, nothing to reflect on.".into());
     }
     let facts_json =
         serde_json::to_string_pretty(&facts).map_err(|e| e.to_string())?;
@@ -120,7 +120,7 @@ pub async fn generate_monthly_narrative(
 /// nothing else (lowercase q, months, ranges all rejected). Returns the
 /// [from, to) ISO date window, `to` exclusive.
 fn parse_period(period: &str) -> Result<(String, String), String> {
-    let err = || format!("invalid period '{period}' — expected YYYY or YYYY-Q1..Q4");
+    let err = || format!("invalid period '{period}': expected YYYY or YYYY-Q1..Q4");
     let year_of = |s: &str| -> Option<i32> {
         (s.len() == 4 && s.bytes().all(|b| b.is_ascii_digit()))
             .then(|| s.parse().ok())
@@ -169,14 +169,14 @@ pub async fn generate_period_narrative(
 ) -> Result<CachedInsight, String> {
     let (from, to) = parse_period(&period)?;
     if !ai::is_configured(&db) {
-        return Err("No AI provider configured — set one up in Settings → AI.".into());
+        return Err("No AI provider configured. Set one up in Settings → AI.".into());
     }
 
     let facts = db
         .narrative_facts_range(&period, &from, &to)
         .map_err(|e| e.to_string())?;
     if facts.get("meetings").and_then(|v| v.as_u64()).unwrap_or(0) == 0 {
-        return Err("No completed meetings in this period yet — nothing to reflect on.".into());
+        return Err("No completed meetings in this period yet, nothing to reflect on.".into());
     }
     let facts_json = serde_json::to_string_pretty(&facts).map_err(|e| e.to_string())?;
 

@@ -373,7 +373,7 @@ export function NotesList({ initialTag }: NotesListProps) {
   function getDuration(m: Meeting): string {
     if (m.actual_start && m.actual_end) {
       const mins = Math.round((new Date(m.actual_end).getTime() - new Date(m.actual_start).getTime()) / 60000);
-      if (mins <= 0) return "—";
+      if (mins <= 0) return "–";
       if (mins < 60) return `${mins}m`;
       return `${Math.floor(mins / 60)}h ${mins % 60 > 0 ? `${mins % 60}m` : ""}`.trim();
     }
@@ -382,28 +382,28 @@ export function NotesList({ initialTag }: NotesListProps) {
       if (mins < 60) return `${mins}m`;
       return `${Math.floor(mins / 60)}h ${mins % 60 > 0 ? `${mins % 60}m` : ""}`.trim();
     }
-    return "—";
+    return "–";
   }
 
   function getAttendeeList(m: Meeting): string {
     try {
       const arr = JSON.parse(m.attendees || "[]");
-      if (!Array.isArray(arr) || arr.length === 0) return "—";
+      if (!Array.isArray(arr) || arr.length === 0) return "–";
       return arr.slice(0, 3).map((a: { name?: string; email?: string }) => a.name || a.email || "").filter(Boolean).join(", ") + (arr.length > 3 ? ` +${arr.length - 3}` : "");
-    } catch { return "—"; }
+    } catch { return "–"; }
   }
 
   function getColumnValue(m: Meeting, col: ColumnId, folderMap: Record<string, Folder>): string {
     const dateStr = m.scheduled_start || m.actual_start || m.created_at;
     const d = dateStr ? new Date(dateStr) : null;
     switch (col) {
-      case "date": return d ? format(d, "MMM d, yyyy") : "—";
-      case "time": return d ? format(d, "h:mm a") : "—";
+      case "date": return d ? format(d, "MMM d, yyyy") : "–";
+      case "time": return d ? format(d, "h:mm a") : "–";
       case "duration": return getDuration(m);
       case "attendees": return getAttendeeList(m);
-      case "location": return m.location || "—";
-      case "folder": return folderMap[m.id]?.name || "—";
-      case "platform": return m.platform || "—";
+      case "location": return m.location || "–";
+      case "folder": return folderMap[m.id]?.name || "–";
+      case "platform": return m.platform || "–";
     }
   }
 

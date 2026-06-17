@@ -187,11 +187,11 @@ pub async fn catch_me_up(
     let transcript = db
         .get_transcript_by_meeting(&meeting_id)
         .map_err(|e| e.to_string())?
-        .ok_or("Nothing transcribed yet — give it a moment")?;
+        .ok_or("Nothing transcribed yet. Give it a moment.")?;
     let segments: Vec<TranscriptSegment> =
         serde_json::from_str(&transcript.segments).unwrap_or_default();
     if segments.iter().all(|s| s.text.trim().is_empty()) {
-        return Err("Nothing transcribed yet — give it a moment".into());
+        return Err("Nothing transcribed yet. Give it a moment.".into());
     }
     let names = meeting_speaker_names(&db)?;
     let context = recap_tail(&segments, &names, &meeting_id, CATCH_UP_CONTEXT_CHARS);
@@ -1252,7 +1252,7 @@ Attendees: {}
 pub(crate) async fn build_user_context_from_meetings(db: &Database) -> Result<String, String> {
     let (corpus, used) = gather_meeting_corpus(db, 10)?;
     if used < 3 {
-        return Err("Not enough meeting content yet — enhance a few more meetings first.".to_string());
+        return Err("Not enough meeting content yet. Enhance a few more meetings first.".to_string());
     }
     let prompt = format!(
         "You are helping personalize a meeting-notes app. From the meeting notes below, write a short 'About the user' profile of the app's owner (the person who recorded all of these meetings): their likely role, company/domain, current projects, and frequent collaborators.\n\
@@ -1326,7 +1326,7 @@ fn format_generated_notes(raw: &str) -> String {
                     let deadline = item["deadline"].as_str().unwrap_or("");
                     let mut line = format!("- {}", task);
                     if !assignee.is_empty() { line.push_str(&format!(" ({})", assignee)); }
-                    if !deadline.is_empty() { line.push_str(&format!(" — due {}", deadline)); }
+                    if !deadline.is_empty() { line.push_str(&format!(" (due {})", deadline)); }
                     out.push_str(&line);
                     out.push('\n');
                 }

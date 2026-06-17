@@ -154,14 +154,14 @@ function FormattingToolbar({ editor }: { editor: Editor | null }) {
       <ToolbarButton
         onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
         active={editor.isActive("heading", { level: 1 })}
-        title="Heading 1 — type # then space"
+        title="Heading 1: type # then space"
       >
         <Heading1 size={13} />
       </ToolbarButton>
       <ToolbarButton
         onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
         active={editor.isActive("heading", { level: 2 })}
-        title="Heading 2 — type ## then space"
+        title="Heading 2: type ## then space"
       >
         <Heading2 size={13} />
       </ToolbarButton>
@@ -172,28 +172,28 @@ function FormattingToolbar({ editor }: { editor: Editor | null }) {
       <ToolbarButton
         onClick={() => editor.chain().focus().toggleBulletList().run()}
         active={editor.isActive("bulletList")}
-        title="Bullet list — type - then space"
+        title="Bullet list: type - then space"
       >
         <List size={13} />
       </ToolbarButton>
       <ToolbarButton
         onClick={() => editor.chain().focus().toggleOrderedList().run()}
         active={editor.isActive("orderedList")}
-        title="Numbered list — type 1. then space"
+        title="Numbered list: type 1. then space"
       >
         <ListOrdered size={13} />
       </ToolbarButton>
       <ToolbarButton
         onClick={() => editor.chain().focus().toggleTaskList().run()}
         active={editor.isActive("taskList")}
-        title="Task list — type [] then space · ⌘⏎ toggles done"
+        title="Task list: type [] then space · ⌘⏎ toggles done"
       >
         <CheckSquare size={13} />
       </ToolbarButton>
       <ToolbarButton
         onClick={() => editor.chain().focus().toggleBlockquote().run()}
         active={editor.isActive("blockquote")}
-        title="Blockquote — type > then space"
+        title="Blockquote: type > then space"
       >
         <Quote size={13} />
       </ToolbarButton>

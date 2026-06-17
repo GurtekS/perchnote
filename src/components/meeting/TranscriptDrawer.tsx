@@ -257,7 +257,7 @@ export function TranscriptDrawer({
       setEditing((cur) => {
         if (cur) {
           toast.info(
-            "The transcript was upgraded by the accuracy pass — please redo that edit",
+            "The transcript was upgraded by the accuracy pass. Please redo that edit.",
             "Edit not saved",
           );
         }
@@ -294,7 +294,7 @@ export function TranscriptDrawer({
           const { addCorrectionRule } = await import("../../lib/correctionRules");
           await addCorrectionRule(find, replace);
           queryClient.invalidateQueries({ queryKey: ["correction-rules"] });
-          toast.success(`Replaced in ${n} segment${n === 1 ? "" : "s"} — “${find}” → “${replace}” will be fixed in every future transcript`);
+          toast.success(`Replaced in ${n} segment${n === 1 ? "" : "s"}. “${find}” → “${replace}” will be fixed in every future transcript.`);
           setReplaceDraft("");
           setAlwaysFix(false);
           return;
@@ -327,7 +327,7 @@ export function TranscriptDrawer({
         setReplaceDraft("");
       } else {
         toast.info(
-          `No matches for “${find}” — check spelling and punctuation; matching ignores letter case.`,
+          `No matches for “${find}”. Check spelling and punctuation; matching ignores letter case.`,
         );
       }
     } catch (e) {

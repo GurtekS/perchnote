@@ -43,7 +43,7 @@ interface Props {
 /** Shown while recording — states the Granola-style contract out loud:
  *  fragments are enough, structure comes free, Enhance fills in the rest. */
 const RECORDING_PLACEHOLDER =
-  "Jot fragments — they're enough. [] + space for a task, ⌘D marks this moment. Enhance fills in the rest.";
+  "Jot fragments. They're enough. [] + space for a task, ⌘D marks this moment. Enhance fills in the rest.";
 
 export function NotesSurface(props: Props) {
   const {
@@ -182,7 +182,7 @@ export function NotesSurface(props: Props) {
                     navigate({ to: "/meeting/$id", params: { id: loop.meeting_id } })
                   }
                   className="flex w-full items-baseline gap-2 rounded-md px-1.5 py-1 text-left hover:bg-bg-hover"
-                  title={`From “${loop.meeting_title}” — open that meeting`}
+                  title={`From “${loop.meeting_title}” (open that meeting)`}
                 >
                   <span className="min-w-0 flex-1 truncate text-sm text-text-secondary">
                     {loop.task}
@@ -205,7 +205,7 @@ export function NotesSurface(props: Props) {
         <div className="card mb-4 p-3 animate-fade-in">
           <p className="section-label mb-2 flex items-center gap-1.5">
             <Repeat size={11} />
-            Last time — {lastTime.title}
+            Last time: {lastTime.title}
             <span className="font-normal normal-case tracking-normal text-text-muted">
               {lastTime.date.slice(0, 10)}
             </span>
@@ -353,7 +353,7 @@ export function NotesSurface(props: Props) {
       ) : isEnhancing || noteLoading ? (
         streamPreview ? (
           <div className="ai-enhanced-text animate-fade-in px-1 py-2">
-            <p className="section-label mb-2">Summary — writing live…</p>
+            <p className="section-label mb-2">Summary, writing live…</p>
             <p className="whitespace-pre-wrap text-sm text-text-secondary">
               {streamPreview}
               <span className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse bg-accent/70" />

@@ -85,7 +85,7 @@ export function DataSettings() {
     if (!audioDeleteTarget) return;
     try {
       const freed = await ipc.deleteMeetingAudio(audioDeleteTarget.id);
-      toast.success(`Audio deleted — ${formatBytes(freed)} freed. Notes and transcript kept.`);
+      toast.success(`Audio deleted. ${formatBytes(freed)} freed. Notes and transcript kept.`);
       queryClient.invalidateQueries({ queryKey: ["storageBreakdown"] });
     } catch (e) {
       toast.error(toUserMessage(e));
@@ -164,12 +164,12 @@ export function DataSettings() {
       const report = await ipc.verifyBackupArchive(summary.path);
       if (report.ok) {
         toast.success(
-          `Backup verified — ${summary.files} files, ${formatBytes(summary.bytes)}, saved to Desktop`
+          `Backup verified. ${summary.files} files, ${formatBytes(summary.bytes)}, saved to Desktop`
         );
       } else {
         console.error("[backup verification]", report.problems);
         toast.error(
-          "Backup saved, but verification found a problem — don't rely on this file. Try exporting again.",
+          "Backup saved, but verification found a problem. Don't rely on this file. Try exporting again.",
           "Backup verification failed",
         );
       }
@@ -193,7 +193,7 @@ export function DataSettings() {
     setRestoring(true);
     try {
       await ipc.restoreBackupArchive(restoreTarget.path);
-      toast.success("Backup verified and staged — restarting…");
+      toast.success("Backup verified and staged. Restarting…");
       setTimeout(() => ipc.restartApp(), 900);
     } catch (e) {
       toast.error(toUserMessage(e), "Restore failed");
@@ -211,7 +211,7 @@ export function DataSettings() {
   const handleMdMirrorChange = async (on: boolean) => {
     await ipc.setSetting("md_mirror_enabled", on ? "true" : "false");
     queryClient.invalidateQueries({ queryKey: ["setting", "md_mirror_enabled"] });
-    toast.success(on ? "Markdown mirror on — Documents/Perchnote" : "Markdown mirror off");
+    toast.success(on ? "Markdown mirror on (Documents/Perchnote)" : "Markdown mirror off");
   };
 
   // Layout migrates lazily (plan v8 B4): each meeting's file moves the next
@@ -224,7 +224,7 @@ export function DataSettings() {
   const handleMirrorLayoutChange = async (value: string) => {
     await ipc.setSetting("md_mirror_layout", value);
     queryClient.invalidateQueries({ queryKey: ["setting", "md_mirror_layout"] });
-    toast.success("Layout saved — files move as notes save, or Sync all now");
+    toast.success("Layout saved. Files move as notes save, or Sync all now");
   };
 
   // Serialize every meeting's best notes (AI if present, else raw) to files.
@@ -278,8 +278,8 @@ export function DataSettings() {
       if (conflicts > 0) {
         toast.warning(
           conflicts === 1
-            ? "1 file had your edits — wrote .conflict.md beside it"
-            : `${conflicts} files had your edits — wrote .conflict.md beside them`,
+            ? "1 file had your edits. Wrote .conflict.md beside it"
+            : `${conflicts} files had your edits. Wrote .conflict.md beside them`,
         );
       }
     } catch (e) {
@@ -319,7 +319,7 @@ export function DataSettings() {
       // One command instead of a per-meeting IPC loop; the backend also
       // compacts the database when the purge fragments it.
       const n = await ipc.emptyTrash();
-      toast.success(`Trash emptied — ${n} meeting${n === 1 ? "" : "s"} permanently removed`);
+      toast.success(`Trash emptied. ${n} meeting${n === 1 ? "" : "s"} permanently removed`);
     } catch (e) {
       toast.error(toUserMessage(e));
     }
@@ -473,7 +473,7 @@ export function DataSettings() {
         <h3 className="text-sm font-semibold text-text-primary mb-1">Audio retention</h3>
         <p className="text-xs text-text-muted mb-3">
           Recordings are the bulk of your storage (~175 MB per meeting-hour).
-          Optionally remove audio after a while — notes and transcripts are
+          Optionally remove audio after a while. Notes and transcripts are
           always kept, and meetings marked “Keep” are never touched.
         </p>
         <select
@@ -575,7 +575,7 @@ export function DataSettings() {
             className="mt-0.5 accent-[var(--accent)]"
           />
           <span className="text-xs text-text-muted">
-            Keep a Markdown copy of every meeting's notes in Documents/Perchnote —
+            Keep a Markdown copy of every meeting's notes in Documents/Perchnote:
             plain files that iCloud, git, or Obsidian can pick up. Notes mirror
             when they're enhanced; use Sync all for everything at once.
           </span>
@@ -584,7 +584,7 @@ export function DataSettings() {
           <div className="space-y-2">
             <label className="block">
               <span className="text-xs text-text-muted">
-                Folder layout — existing files move to the new spot the next
+                Folder layout. Existing files move to the new spot the next
                 time their notes save; Sync all applies it to everything now.
               </span>
               <select
@@ -614,7 +614,7 @@ export function DataSettings() {
       <section>
         <h3 className="text-sm font-semibold text-text-primary mb-1">Auto-archive meetings</h3>
         <p className="text-xs text-text-muted mb-3">
-          Move old meetings out of the list automatically. Archiving hides —
+          Move old meetings out of the list automatically. Archiving hides;
           it never deletes anything.
         </p>
         <select
@@ -636,8 +636,8 @@ export function DataSettings() {
         <h3 className="text-sm font-semibold text-text-primary mb-1">Archived</h3>
         <p className="text-xs text-text-muted mb-3">
           {archivedMeetings.length === 0
-            ? "No archived meetings. Archiving (including auto-archive above) hides meetings here — nothing is deleted."
-            : `${archivedMeetings.length} archived meeting${archivedMeetings.length !== 1 ? "s" : ""} — hidden from the list, fully intact.`}
+            ? "No archived meetings. Archiving (including auto-archive above) hides meetings here; nothing is deleted."
+            : `${archivedMeetings.length} archived meeting${archivedMeetings.length !== 1 ? "s" : ""}, hidden from the list, fully intact.`}
         </p>
         {archivedMeetings.length > 0 && (
           <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-border p-2">
@@ -675,7 +675,7 @@ export function DataSettings() {
           className={`${settingsInputClass} mb-3 w-full`}
         >
           <option value="0">Keep trash until I empty it (default)</option>
-          <option value="30">Clear trash after 30 days — meetings, notes, and audio gone for good</option>
+          <option value="30">Clear trash after 30 days (meetings, notes, and audio gone for good)</option>
         </select>
         {deletedMeetings.length > 0 && (
           <div className="ios-group mb-3">
@@ -698,7 +698,7 @@ export function DataSettings() {
                 <button
                   onClick={() => setConfirmForever(m)}
                   className="shrink-0 rounded-md px-2 py-1 text-xs text-recording transition-colors hover:bg-recording/10"
-                  title="Delete forever — notes, transcript, and audio"
+                  title="Delete forever: notes, transcript, and audio"
                 >
                   Delete forever
                 </button>
@@ -756,7 +756,7 @@ export function DataSettings() {
       <ConfirmDialog
         open={audioDeleteTarget !== null}
         title="Delete this recording's audio"
-        message={`Delete the audio file for “${audioDeleteTarget?.title ?? ""}”? The meeting, its notes, and its transcript are kept — only playback goes away. This cannot be undone.`}
+        message={`Delete the audio file for “${audioDeleteTarget?.title ?? ""}”? The meeting, its notes, and its transcript are kept; only playback goes away. This cannot be undone.`}
         confirmLabel="Delete audio"
         variant="danger"
         onConfirm={handleDeleteAudio}

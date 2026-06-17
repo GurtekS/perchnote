@@ -90,7 +90,7 @@ export function TodayView() {
       const dateStr = new Intl.DateTimeFormat("en-US", {
         month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true,
       }).format(new Date());
-      const m = await ipc.createMeeting(`Meeting \u2014 ${dateStr}`);
+      const m = await ipc.createMeeting(`Meeting ${dateStr}`);
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
       setPendingAutoStart(m.id);
       navigate({ to: "/meeting/$id", params: { id: m.id } });

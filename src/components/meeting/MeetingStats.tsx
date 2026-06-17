@@ -701,7 +701,7 @@ export function MeetingStats({ meetingId, actualStart, actualEnd, scheduledStart
                           })}
                         </div>
                         <p className="text-footnote text-text-muted mt-1.5">
-                          Unique words ÷ total words — higher = more varied vocabulary
+                          Unique words ÷ total words. Higher means more varied vocabulary.
                         </p>
                       </div>
                     )}

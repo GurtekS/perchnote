@@ -22,7 +22,7 @@ export async function createQuickVoiceNote(
     const dateStr = new Intl.DateTimeFormat("en-US", {
       month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true,
     }).format(new Date());
-    const m = await ipc.createMeeting(`Voice note — ${dateStr}`);
+    const m = await ipc.createMeeting(`Voice note ${dateStr}`);
     try {
       const tags = await ipc.listTags();
       const tag =

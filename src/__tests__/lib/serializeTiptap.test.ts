@@ -16,7 +16,7 @@ describe("serializeTiptapToMarkdown", () => {
     });
     const md = serializeTiptapToMarkdown(doc);
 
-    expect(md).toContain("> **Summary** — We agreed to ship Friday.");
+    expect(md).toContain("> **Summary:** We agreed to ship Friday.");
     expect(md).toContain("## Decisions");
     expect(md).toContain("- Ship v2");
     expect(md).toContain("- [ ] Send recap (@Amy, due ");

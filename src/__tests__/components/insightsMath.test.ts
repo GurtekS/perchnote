@@ -192,7 +192,7 @@ describe("topic trends", () => {
   it("speaks the change month-over-month", () => {
     const s = trendSeries(trend, TODAY, 6);
     expect(trendSentence("pricing", s)).toBe(
-      "Pricing came up in 4 meetings in June — up from 1 in May.",
+      "Pricing came up in 4 meetings in June, up from 1 in May.",
     );
   });
 

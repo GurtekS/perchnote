@@ -122,7 +122,7 @@ export function EnhanceButton({
       const n = generated.action_items.length;
       if (n > 0) {
         toast.action(
-          `Notes enhanced — ${n} action item${n === 1 ? "" : "s"} captured`,
+          `Notes enhanced. ${n} action item${n === 1 ? "" : "s"} captured.`,
           "View tasks",
           () => navigate({ to: "/tasks" }),
         );
@@ -295,7 +295,7 @@ export function EnhanceButton({
               </button>
             ))}
             {customTemplates.length === 0 && (
-              <p className="px-3 py-2 text-xs text-text-muted">No templates yet — create one in Settings.</p>
+              <p className="px-3 py-2 text-xs text-text-muted">No templates yet. Create one in Settings.</p>
             )}
           </div>
         </div>

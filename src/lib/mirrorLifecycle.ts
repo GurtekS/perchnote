@@ -38,7 +38,7 @@ function surfaceConflict(meetingId: string, result: MirrorWriteResult): void {
   const file = result.path.slice(result.path.lastIndexOf("/") + 1);
   const dir = result.path.slice(0, result.path.lastIndexOf("/"));
   toast.action(
-    `This note's file was edited outside Perchnote, so it was left alone — the latest notes were written to "${file}" beside it.`,
+    `This note's file was edited outside Perchnote, so it was left alone. The latest notes were written to "${file}" beside it.`,
     "Show in Finder",
     // reveal_in_finder opens directories, so point it at the parent folder.
     () => void ipc.revealInFinder(dir).catch(() => {}),

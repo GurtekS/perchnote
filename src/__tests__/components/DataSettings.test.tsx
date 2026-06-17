@@ -161,7 +161,7 @@ describe("DataSettings sync-all reports clobber-guard conflicts (plan v10 #9)", 
       // Conflicted files still count as mirrored — their content was written,
       // just to a .conflict.md the user gets told about.
       expect(messages).toContain("Mirrored 3 meetings to Documents/Perchnote");
-      expect(messages).toContain("2 files had your edits — wrote .conflict.md beside them");
+      expect(messages).toContain("2 files had your edits. Wrote .conflict.md beside them");
     });
   });
 
@@ -175,7 +175,7 @@ describe("DataSettings sync-all reports clobber-guard conflicts (plan v10 #9)", 
 
     await waitFor(() => {
       expect(useToastStore.getState().toasts.map((t) => t.message)).toContain(
-        "1 file had your edits — wrote .conflict.md beside it",
+        "1 file had your edits. Wrote .conflict.md beside it",
       );
     });
 

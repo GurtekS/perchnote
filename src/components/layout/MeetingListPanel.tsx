@@ -220,7 +220,7 @@ export function MeetingListPanel() {
     if (failed > 0) {
       toast.error(`${failed} of ${ids.length} couldn't be moved to trash`);
     } else {
-      toast.success(`${ids.length} meeting${ids.length !== 1 ? "s" : ""} moved to trash — restore from Trash below`);
+      toast.success(`${ids.length} meeting${ids.length !== 1 ? "s" : ""} moved to trash. Restore from Trash below.`);
     }
     clearSelection();
     if (ids.some((id) => window.location.pathname.includes(id))) {
@@ -447,8 +447,8 @@ export function MeetingListPanel() {
           onClick={handleNewMeeting}
           className="w-6 h-6 rounded-md flex items-center justify-center transition-colors"
           style={{ color: "var(--icon-color-dim)" }}
-          title="New meeting — without recording (⌘N creates one AND records)"
-          aria-label="New meeting — without recording"
+          title="New meeting without recording (⌘N creates one AND records)"
+          aria-label="New meeting without recording"
           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--icon-hover-bg)"; (e.currentTarget as HTMLElement).style.color = "var(--icon-color-bright)"; }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ""; (e.currentTarget as HTMLElement).style.color = "var(--icon-color-dim)"; }}
         >
@@ -644,7 +644,7 @@ export function MeetingListPanel() {
           onClick={() => navigate({ to: "/settings", search: { section: "data" } })}
           className="shrink-0 flex items-center gap-2 px-3.5 py-2 text-left transition-colors hover:bg-bg-hover"
           style={{ borderTop: "1px solid var(--glass-header-border)", color: "var(--icon-color-dim)" }}
-          title="Open the trash — restore or permanently delete"
+          title="Open the trash: restore or permanently delete"
         >
           <Trash2 size={12} className="shrink-0" />
           <span className="text-caption" style={{ color: "var(--meeting-meta-color)" }}>

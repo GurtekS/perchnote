@@ -8,7 +8,7 @@ use crate::transcription::whisper::TranscriptSegment;
 ///
 /// Hard rules:
 /// - Only the exact strings the app's own creation sites write qualify:
-///   "Untitled Meeting" and "Meeting — <en-US creation stamp>". A user-typed
+///   "Untitled Meeting" and "Meeting <en-US creation stamp>". A user-typed
 ///   title — even one literally named "Meeting" or "Untitled" — is never
 ///   touched, because the app never writes those strings itself.
 /// - Calendar-linked meetings are skipped entirely: their title belongs to
@@ -32,19 +32,19 @@ const TITLE_TIMEOUT_SECS: u64 = 30;
 
 /// Only titles the app itself writes when the user provides none:
 /// "Untitled Meeting" (new-without-recording, notes-first, calendar
-/// no-title fallback) and the ⌘N/deep-link "Meeting — <creation stamp>".
-/// Deliberately NOT bare "Meeting"/"Untitled"/"New meeting" — no creation
-/// site has ever written those, so a meeting carrying one was named by the
+/// no-title fallback) and the ⌘N/deep-link "Meeting <creation stamp>".
+/// Deliberately NOT bare "Meeting"/"Untitled"/"New meeting" (no creation
+/// site has ever written those), so a meeting carrying one was named by the
 /// user (or their calendar) and is theirs.
 pub(crate) fn is_placeholder_title(title: &str) -> bool {
     let t = title.trim();
     if t.eq_ignore_ascii_case("untitled meeting") {
         return true;
     }
-    // "Meeting — Jun 11, 6:05 PM" / "Meeting — Jun 9 at 11:53 AM" (the two
-    // glues en-US Intl produces). The whole suffix must be date-shaped:
-    // "Meeting — Mar 3 budget kickoff" is a real title.
-    if let Some(rest) = t.strip_prefix("Meeting — ") {
+    // "Meeting Jun 11, 6:05 PM" / "Meeting Jun 9 at 11:53 AM" (the two glues
+    // en-US Intl produces). The whole suffix must be date-shaped, so a real
+    // title like "Meeting Mar 3 budget kickoff" is left alone.
+    if let Some(rest) = t.strip_prefix("Meeting ") {
         return looks_like_datestamp(rest);
     }
     false
@@ -361,11 +361,11 @@ mod tests {
             "  Untitled Meeting  ",
             // Comma glue (older ICU) and "at" glue (the shipped WKWebView's
             // en-US output — see the series tests in db/queries.rs).
-            "Meeting — Jun 11, 6:05 PM",
-            "Meeting — Dec 3, 12:00 AM",
-            "Meeting — Jun 9 at 11:53 AM",
-            "Meeting — May 5 at 9:00 AM",
-            "Meeting — Sep 30 at 12:00 AM",
+            "Meeting Jun 11, 6:05 PM",
+            "Meeting Dec 3, 12:00 AM",
+            "Meeting Jun 9 at 11:53 AM",
+            "Meeting May 5 at 9:00 AM",
+            "Meeting Sep 30 at 12:00 AM",
         ] {
             assert!(is_placeholder_title(t), "{t:?} should be a placeholder");
         }
@@ -375,13 +375,13 @@ mod tests {
     fn user_titles_are_never_placeholders() {
         for t in [
             "Q3 Budget Review",
-            "Meeting — Budget review",   // en-dash but no datestamp: user-typed
-            "Meeting — Mar 3 budget kickoff", // date-opening suffix, real words after
-            "Meeting — Dec 10 board prep",
-            "Meeting — May 5K planning",
+            "Meeting Budget review",   // real title starting with Meeting, no datestamp
+            "Meeting Mar 3 budget kickoff", // date-opening suffix, real words after
+            "Meeting Dec 10 board prep",
+            "Meeting May 5K planning",
             "Meeting with Sam",
             "1:1 with Amy Chen",
-            "Voice note — Jun 11, 6:05 PM", // voice notes self-title elsewhere
+            "Voice note Jun 11, 6:05 PM", // voice notes self-title elsewhere
             "Meetings retrospective",
             "Junk drawer cleanup",
             // The app never writes these; a meeting carrying one was named

@@ -107,7 +107,7 @@ export function TasksView() {
     },
     onError: (_e, _i, ctx) => {
       if (ctx?.prev) queryClient.setQueryData(["action-items"], ctx.prev);
-      toast.error("Couldn't update that task — refreshing.");
+      toast.error("Couldn't update that task. Refreshing.");
       queryClient.invalidateQueries({ queryKey: ["action-items"] });
     },
     onSettled: (_d, _e, i) => {
@@ -289,7 +289,7 @@ export function TasksView() {
     } catch (e) {
       // A mid-batch failure must not lose the remainder: say how far the
       // batch got, and keep only the un-acted rows selected for a retry.
-      toast.error(toUserMessage(e), `${ok} of ${targets.length} done — the rest stay selected`);
+      toast.error(toUserMessage(e), `${ok} of ${targets.length} done. The rest stay selected`);
       setSelected((prev) => {
         const next = new Set(prev);
         for (const k of acted) next.delete(k);
@@ -329,7 +329,7 @@ export function TasksView() {
     runBulk(
       selectedOpen,
       (i) => ipc.setTaskDropped(i.note_id, i.source, i.index, true, i.task),
-      (n) => `Dropped ${n} task${n === 1 ? "" : "s"} — the notes keep them as written`,
+      (n) => `Dropped ${n} task${n === 1 ? "" : "s"}. The notes keep them as written`,
     );
 
   // Plan rank 7: hand the given open tasks to Apple Reminders (the action
@@ -344,7 +344,7 @@ export function TasksView() {
       const n = await ipc.exportTasksToReminders(
         open.map((i) => ({
           task: i.task || "(untitled task)",
-          body: `From “${i.meeting_title}” in Perchnote${i.assignee?.trim() ? ` — ${i.assignee.trim()}` : ""}`,
+          body: `From “${i.meeting_title}” in Perchnote${i.assignee?.trim() ? ` (${i.assignee.trim()})` : ""}`,
           deadline: i.deadline,
           note_id: i.note_id,
           source: i.source,
@@ -373,7 +373,7 @@ export function TasksView() {
     try {
       await ipc.openUrl(buildThingsUrl(list));
       toast.success(
-        `Sent ${list.length} task${list.length === 1 ? "" : "s"} to Things — completing them there won't sync back`,
+        `Sent ${list.length} task${list.length === 1 ? "" : "s"} to Things. Completing them there won't sync back`,
       );
     } catch (e) {
       toast.error(toUserMessage(e, "Things hand-off failed"), "Things hand-off failed");
@@ -393,7 +393,7 @@ export function TasksView() {
         const n = await ipc.pullReminderCompletions();
         if (n > 0) {
           queryClientForPull.invalidateQueries({ queryKey: ["action-items"] });
-          toast.success(`${n} task${n === 1 ? "" : "s"} completed in Reminders — synced`);
+          toast.success(`${n} task${n === 1 ? "" : "s"} completed in Reminders, synced`);
         }
       } catch {
         /* Reminders not granted / list absent — quiet */
@@ -477,7 +477,7 @@ export function TasksView() {
             <button
               type="button"
               onClick={() => setTriageDismissed(true)}
-              aria-label="Later — dismiss stale-items reminder"
+              aria-label="Later, dismiss stale-items reminder"
               className="rounded-md px-1.5 py-0.5 text-xs text-text-muted hover:bg-bg-hover"
             >
               Later
@@ -499,7 +499,7 @@ export function TasksView() {
           </div>
           {staleItems.length === 0 ? (
             <p className="m-0 py-2 text-sm text-text-secondary">
-              All clear — nothing stale left. 🎉
+              All clear, nothing stale left. 🎉
             </p>
           ) : (
             <ul className="m-0 flex list-none flex-col gap-1 p-0">
@@ -535,7 +535,7 @@ export function TasksView() {
                     <button
                       type="button"
                       onClick={() => drop(i)}
-                      title="Remove from every list — the note keeps it as written"
+                      title="Remove from every list; the note keeps it as written"
                       className="rounded-md border border-border px-2 py-0.5 text-xs text-text-muted hover:text-recording hover:border-recording/40"
                     >
                       Drop
@@ -582,7 +582,7 @@ export function TasksView() {
             type="button"
             onClick={bulkDrop}
             disabled={bulkBusy || selectedOpen.length === 0}
-            title="Remove the selected tasks from every list — the notes keep them as written"
+            title="Remove the selected tasks from every list; the notes keep them as written"
             className="h-8 rounded-lg border border-border bg-bg-tertiary px-2.5 text-xs text-text-muted transition-colors hover:border-recording/40 hover:text-recording disabled:opacity-50"
           >
             Drop
@@ -591,7 +591,7 @@ export function TasksView() {
             type="button"
             onClick={() => sendToThings(selectedOpen)}
             disabled={bulkBusy || sendingThings || selectedOpen.length === 0}
-            title="Create the selected open tasks as Things to-dos (one-way — completing them in Things won't sync back)"
+            title="Create the selected open tasks as Things to-dos (one-way; completing them in Things won't sync back)"
             className="h-8 rounded-lg border border-border bg-bg-tertiary px-2.5 text-xs text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary disabled:opacity-50"
           >
             {sendingThings ? "Sending…" : "Send to Things"}
@@ -682,7 +682,7 @@ export function TasksView() {
               const theirs = visible.filter((i) => !i.done);
               const lines = theirs.map((i) => {
                 const due = i.deadline ? ` (due ${i.deadline.slice(0, 10)})` : "";
-                return `- ${i.task}${due} — from “${i.meeting_title}”`;
+                return `- ${i.task}${due} (from “${i.meeting_title}”)`;
               });
               const text = `Open items for ${assignee}:\n${lines.join("\n")}`;
               try {
@@ -770,7 +770,7 @@ export function TasksView() {
                 className="block w-full rounded-md px-2.5 py-1.5 text-left text-xs text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary disabled:opacity-50"
               >
                 Things
-                <span className="block text-footnote text-text-muted">One-way — completing there won't sync back</span>
+                <span className="block text-footnote text-text-muted">One-way: completing there won't sync back</span>
               </button>
             </div>
           )}
@@ -949,7 +949,7 @@ export function TasksView() {
         </ul>
         {totalMatching > RENDER_CAP && (
           <p className="px-1 py-3 text-xs text-text-muted">
-            Showing {RENDER_CAP} of {totalMatching} tasks — narrow the filter or
+            Showing {RENDER_CAP} of {totalMatching} tasks. Narrow the filter or
             lens to see the rest.
           </p>
         )}

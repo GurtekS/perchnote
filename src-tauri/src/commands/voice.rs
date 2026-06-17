@@ -510,7 +510,7 @@ pub async fn recluster_speakers(
         }
         return Ok(cluster_count);
     }
-    Err("the transcript changed while re-detecting speakers — try again".to_string())
+    Err("the transcript changed while re-detecting speakers. Try again.".to_string())
 }
 
 /// Speakers that name themselves (plan v10 #1) — the completion hook.

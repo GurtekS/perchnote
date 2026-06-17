@@ -36,7 +36,7 @@ export const SEED_RECIPES: readonly Recipe[] = [
     id: "seed-status-update",
     name: "Status update for my manager",
     prompt:
-      "Write a status update for my manager based on this meeting: exactly three bullets, one sentence each, focused on outcomes and decisions — not process and not who said what. Plain text, no preamble.",
+      "Write a status update for my manager based on this meeting: exactly three bullets, one sentence each, focused on outcomes and decisions, not process and not who said what. Plain text, no preamble.",
   },
   {
     id: "seed-decision-log",

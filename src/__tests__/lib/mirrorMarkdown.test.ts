@@ -43,7 +43,7 @@ describe("buildMirrorMarkdown", () => {
         platform: "zoom",
         location: "HQ 4th floor",
       }),
-      "> **Summary** — We agreed to ship Friday.\n\n## Decisions\n\n- Ship v2\n",
+      "> **Summary:** We agreed to ship Friday.\n\n## Decisions\n\n- Ship v2\n",
       { tags: ["roadmap"], folders: ["Work"], speakers: ["Speaker 1", "Amy"] },
     );
 
@@ -68,7 +68,7 @@ describe("buildMirrorMarkdown", () => {
         "",
         "# Q2 Roadmap",
         "",
-        "> **Summary** — We agreed to ship Friday.",
+        "> **Summary:** We agreed to ship Friday.",
         "",
         "## Decisions",
         "",

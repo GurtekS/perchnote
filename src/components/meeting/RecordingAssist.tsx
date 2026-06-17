@@ -97,7 +97,7 @@ export function RecordingAssist({ segmentCount, catchMeUp }: Props) {
             {recapError ?? recap}
           </p>
           <p className="mt-2 text-footnote text-text-muted">
-            Not saved anywhere — dismiss when you're caught up.
+            Not saved anywhere. Dismiss when you're caught up.
           </p>
         </div>
       )}

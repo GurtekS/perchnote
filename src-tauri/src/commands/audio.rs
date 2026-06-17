@@ -129,7 +129,7 @@ pub async fn start_recording(
     if use_vpio && !vpio_active {
         let _ = app.emit(
             "recording-warning",
-            "Echo cancellation couldn't start — recording with standard mic capture.",
+            "Echo cancellation couldn't start. Recording with standard mic capture.",
         );
     }
     // Flag split (design §1c): the SESSION flag drives the mixer loop and
@@ -336,7 +336,7 @@ pub async fn start_recording(
                     let _ = level_app.emit(
                         "recording-warning",
                         format!(
-                            "Your Mac slept for {} during the recording — capture is re-arming. \
+                            "Your Mac slept for {} during the recording. Capture is re-arming. \
                              The gap is silence in the timeline.",
                             format_gap(delta.as_secs()),
                         ),
@@ -363,7 +363,7 @@ pub async fn start_recording(
                             if let Some(l) = label {
                                 let _ = level_app.emit(
                                     "recording-warning",
-                                    format!("Mic went silent — switched to “{l}”."),
+                                    format!("Mic went silent. Switched to “{l}”."),
                                 );
                             }
                         }
@@ -384,7 +384,7 @@ pub async fn start_recording(
                 emit_health(MicHealth::Ok, SysHealth::Ok, true);
                 let _ = level_app.emit(
                     "recording-warning",
-                    "Audio capture stopped unexpectedly — stop and restart the recording. \
+                    "Audio capture stopped unexpectedly. Stop and restart the recording. \
                      Audio up to this point is saved.",
                 );
                 mixer_died = true;
@@ -540,7 +540,7 @@ pub async fn start_recording(
                 if mic_health == MicHealth::Stalled && prev_mic != Some(MicHealth::Stalled) {
                     let _ = level_app.emit(
                         "recording-warning",
-                        "Your microphone went silent — check the input device. \
+                        "Your microphone went silent. Check the input device. \
                          Other participants' audio is still being captured.",
                     );
                 }
@@ -550,14 +550,14 @@ pub async fn start_recording(
                 {
                     let _ = level_app.emit(
                         "recording-warning",
-                        "Screen Recording permission was revoked — other participants' audio \
+                        "Screen Recording permission was revoked. Other participants' audio \
                          is no longer being captured.",
                     );
                 }
                 if sys_health == SysHealth::Silent && prev_sys != Some(SysHealth::Silent) {
                     let _ = level_app.emit(
                         "recording-warning",
-                        "System audio has gone flat during an active call — attempting recovery.",
+                        "System audio has gone flat during an active call. Attempting recovery.",
                     );
                 }
             }
@@ -785,7 +785,7 @@ pub async fn start_recording(
                             log::error!("whisper transcription task failed: {:?}", e);
                             let _ = app_for_status.emit(
                                 "transcription-status",
-                                "Transcription stopped unexpectedly — check logs",
+                                "Transcription stopped unexpectedly. Check logs.",
                             );
                         }
                     }
@@ -1412,7 +1412,7 @@ pub async fn generate_meeting_notes(
         && user_notes.as_deref().map_or(true, |n| n.trim().is_empty())
     {
         return Err(
-            "Nothing to enhance yet — there's no transcript and no typed notes. \
+            "Nothing to enhance yet: there's no transcript and no typed notes. \
              If this meeting is still transcribing, give it a moment."
                 .to_string(),
         );

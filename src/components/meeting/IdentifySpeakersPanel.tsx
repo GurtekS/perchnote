@@ -62,7 +62,7 @@ export function IdentifySpeakersPanel({ meetingId, initialSpeaker }: Props) {
   const merge = async (fromKey: string, intoKey: string) => {
     try {
       const changed = await ipc.mergeSpeakers(meetingId, fromKey, intoKey);
-      toast.success(`Merged — ${changed} segment${changed === 1 ? "" : "s"} reassigned`);
+      toast.success(`Merged. ${changed} segment${changed === 1 ? "" : "s"} reassigned.`);
       await refreshSpeakerData();
     } catch (e) {
       toast.error(toUserMessage(e), "Merge failed");

@@ -2,7 +2,7 @@
 
 Perchnote registers the `perchnote://` URL scheme, which makes it scriptable
 from anything that can open a URL: Apple Shortcuts, Raycast, Stream Deck,
-Alfred, cron, or a plain shell. Everything runs locally — opening a link
+Alfred, cron, or a plain shell. Everything runs locally, and opening a link
 never touches the network.
 
 ## Supported links
@@ -14,9 +14,9 @@ never touches the network.
 | `perchnote://record/stop` | Stop the current recording and kick off transcription. |
 | `perchnote://meeting/<uuid>` | Open a specific meeting. |
 | `perchnote://meeting/<uuid>/transcript` | Open a specific meeting with the transcript drawer popped. |
-| `perchnote://search?q=<query>` | Open the command palette pre-filled with `<query>` — the full search grammar (`speaker:"Amy"`, `folder:`, `before:`/`after:`) works exactly as if typed. |
+| `perchnote://search?q=<query>` | Open the command palette pre-filled with `<query>`. The full search grammar (`speaker:"Amy"`, `folder:`, `before:`/`after:`) works exactly as if typed. |
 
-Anything else is ignored — unknown links are dropped, and `meeting/` links
+Anything else is ignored: unknown links are dropped, and `meeting/` links
 must carry a valid UUID.
 
 ## x-callback-url
@@ -25,11 +25,11 @@ Every verb accepts the standard [x-callback-url](https://x-callback-url.com)
 companion params, and `perchnote://x-callback-url/<verb>` works as an alias
 for `perchnote://<verb>`:
 
-- `x-success=<url>` — opened after the action is dispatched.
-- `x-error=<url>` — opened (with `?errorMessage=<why>` appended) when the
+- `x-success=<url>` is opened after the action is dispatched.
+- `x-error=<url>` is opened (with `?errorMessage=<why>` appended) when the
   link doesn't parse.
 
-Callback URLs may only be `shortcuts://x-callback-url/…` — the resume shape
+Callback URLs may only be `shortcuts://x-callback-url/…`, the resume shape
 Apple Shortcuts itself supplies. Anything else is refused, including
 `shortcuts://run-shortcut` (it would *execute* an automation, not resume
 one) and `http(s)`: a webpage can trigger `perchnote://` links, and
@@ -41,15 +41,15 @@ perchnote://x-callback-url/record/start?title=Standup&x-success=shortcuts%3A%2F%
 ```
 
 In Apple Shortcuts, use the **Open X-Callback URL** action with
-`perchnote://record/start?title=Standup` — Shortcuts appends `x-success`
+`perchnote://record/start?title=Standup`. Shortcuts appends `x-success`
 itself and resumes the shortcut when Perchnote calls it back.
 
 Where meeting links come from (you never type a UUID by hand):
 
-- **Obsidian/markdown mirror** — every mirrored note's frontmatter has a
+- **Obsidian/markdown mirror.** Every mirrored note's frontmatter has a
   `perchnote: perchnote://meeting/…` key. In Obsidian, the link jumps you
   from the vault note straight back to the meeting in Perchnote.
-- **Things hand-off** — tasks sent to Things carry the meeting link in
+- **Things hand-off.** Tasks sent to Things carry the meeting link in
   their notes, so a to-do always points back to the meeting it came from.
 
 ## Recipes
@@ -59,7 +59,7 @@ Where meeting links come from (you never type a UUID by hand):
 1. Shortcuts → **+** → search for the **Open URLs** action.
 2. Set the URL to `perchnote://record/start`.
 3. Name it "Start Meeting Recording".
-4. In the shortcut's settings (ⓘ), add it to the menu bar — or assign a
+4. In the shortcut's settings (ⓘ), add it to the menu bar, or assign a
    keyboard shortcut under **Use as Quick Action → Keyboard**.
 
 Make a second one with `perchnote://record/stop` ("Stop Meeting Recording").
@@ -88,8 +88,8 @@ open "perchnote://record/start"
 ### Stream Deck
 
 Add a **System → Website** action with `perchnote://record/start` as the
-URL and check "Open in background" off — one physical button to start
-recording.
+URL and check "Open in background" off. That gives you one physical
+button to start recording.
 
 ### Shell / anything else
 

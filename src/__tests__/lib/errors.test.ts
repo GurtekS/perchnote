@@ -6,7 +6,7 @@ vi.spyOn(console, "error").mockImplementation(() => {});
 describe("toUserMessage", () => {
   it("maps known Rust error classes to actionable copy", () => {
     expect(toUserMessage("Failed to update note: database is locked")).toBe(
-      "The database is busy — try again in a moment.",
+      "The database is busy. Try again in a moment.",
     );
     expect(toUserMessage("No such file or directory (os error 2)")).toContain("file was missing");
     expect(toUserMessage("selected template not found")).toContain("Settings → Templates");

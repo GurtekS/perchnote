@@ -140,7 +140,7 @@ export function RecipesPanel({ meetingId, meetingTitle, isOpen, onClose }: Recip
         toast.success(
           bindingIsMine
             ? `"${recipe.name}" will no longer auto-run for this series`
-            : `"${recipe.name}" will run automatically when meetings like this finish — output appears as a dismissible card, never in your notes`,
+            : `"${recipe.name}" will run automatically when meetings like this finish. Output appears as a dismissible card, never in your notes.`,
         );
       } catch (e) {
         toast.error(toUserMessage(e));
@@ -281,7 +281,7 @@ export function RecipesPanel({ meetingId, meetingTitle, isOpen, onClose }: Recip
                     </button>
                   )}
                   <span className="ml-auto text-footnote text-text-muted">
-                    Not saved anywhere — copy what you need.
+                    Not saved anywhere. Copy what you need.
                   </span>
                 </div>
               )}
@@ -301,7 +301,7 @@ export function RecipesPanel({ meetingId, meetingTitle, isOpen, onClose }: Recip
               <textarea
                 value={draft.prompt}
                 onChange={(e) => setDraft({ ...draft, prompt: e.target.value })}
-                placeholder="Prompt — what should the AI do with this meeting?"
+                placeholder="Prompt: what should the AI do with this meeting?"
                 aria-label="Recipe prompt"
                 rows={5}
                 className="w-full resize-y rounded-lg border border-border bg-transparent px-2.5 py-1.5 text-body-sm leading-relaxed text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
@@ -311,15 +311,15 @@ export function RecipesPanel({ meetingId, meetingTitle, isOpen, onClose }: Recip
                   into the prompt sent to your AI provider. */}
               <p className="text-footnote text-text-muted">
                 The transcript and notes are included automatically. Optional
-                placeholders: {"{{title}}"}, {"{{date}}"}, and {"{{attendees}}"} —
-                the last sends this meeting&apos;s calendar attendee names to your
+                placeholders: {"{{title}}"}, {"{{date}}"}, and {"{{attendees}}"}.
+                The last sends this meeting&apos;s calendar attendee names to your
                 AI provider, only if you use it.
               </p>
               <input
                 type="text"
                 value={draft.scope}
                 onChange={(e) => setDraft({ ...draft, scope: e.target.value })}
-                placeholder="Scope (optional) — folder:ClientX speaker:Amy after:2026-03"
+                placeholder="Scope (optional): folder:ClientX speaker:Amy after:2026-03"
                 aria-label="Recipe scope filters"
                 maxLength={200}
                 className="w-full rounded-lg border border-border bg-transparent px-2.5 py-1.5 text-body-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
@@ -330,7 +330,7 @@ export function RecipesPanel({ meetingId, meetingTitle, isOpen, onClose }: Recip
                     <FilterChips chips={scopeChips} />
                   ) : (
                     <p className="m-0 text-footnote text-warning" role="status">
-                      No filters recognized — this text would go into the
+                      No filters recognized. This text would go into the
                       prompt instead of scoping which meetings are searched.
                     </p>
                   )}
@@ -344,7 +344,7 @@ export function RecipesPanel({ meetingId, meetingTitle, isOpen, onClose }: Recip
               )}
               <p className="text-footnote text-text-muted">
                 Leave the scope empty to run on the open meeting. With filters,
-                the recipe runs across your recent meetings — same retrieval as
+                the recipe runs across your recent meetings, the same retrieval as
                 Ask AI&apos;s All-meetings mode, scoped by the filters.
               </p>
               <div className="flex items-center gap-2">
@@ -434,7 +434,7 @@ export function RecipesPanel({ meetingId, meetingTitle, isOpen, onClose }: Recip
                   ))}
                   {recipes.length === 0 && (
                     <p className="px-2 py-3 text-sm text-text-muted">
-                      No recipes yet — add one below.
+                      No recipes yet. Add one below.
                     </p>
                   )}
                 </>

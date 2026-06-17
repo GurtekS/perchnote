@@ -8,7 +8,7 @@ describe("slashCommandItems", () => {
       "Heading 1", "Heading 2", "Heading 3",
       "Bulleted list", "Numbered list", "Task list",
       "Quote", "Divider", "Code block",
-      "Callout — info", "Callout — warn", "Callout — tip",
+      "Callout (info)", "Callout (warn)", "Callout (tip)",
       "Toggle",
     ]);
   });

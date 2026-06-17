@@ -33,7 +33,7 @@ export function RecipeAutoRunCard({ meetingId }: { meetingId: string }) {
       <div className="flex items-center gap-1.5">
         <BookOpen size={11} className="shrink-0 text-accent" />
         <span className="text-footnote font-semibold uppercase tracking-wider text-text-muted">
-          {card.recipeName} — ran automatically
+          {card.recipeName} · ran automatically
         </span>
         <div className="flex-1" />
         <button
@@ -59,7 +59,7 @@ export function RecipeAutoRunCard({ meetingId }: { meetingId: string }) {
         {card.text}
       </p>
       <p className="mt-1.5 text-footnote text-text-muted">
-        Not saved anywhere — copy what you need. Manage auto-run in Recipes.
+        Not saved anywhere. Copy what you need. Manage auto-run in Recipes.
       </p>
     </div>
   );

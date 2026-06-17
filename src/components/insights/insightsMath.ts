@@ -77,11 +77,11 @@ export function loadHeadline(weeks: WeekLoad[]): string {
   const diff = current.hours - typical;
   const base = `${fmtHours(current.hours)} in meetings this week`;
   if (Math.abs(diff) < Math.max(0.5, typical * 0.15)) {
-    return `${base} — about your typical week (${fmtHours(typical)}).`;
+    return `${base}, about your typical week (${fmtHours(typical)}).`;
   }
   return diff > 0
-    ? `${base} — ${fmtHours(diff)} more than your typical ${fmtHours(typical)}.`
-    : `${base} — ${fmtHours(-diff)} lighter than your typical ${fmtHours(typical)}.`;
+    ? `${base}, ${fmtHours(diff)} more than your typical ${fmtHours(typical)}.`
+    : `${base}, ${fmtHours(-diff)} lighter than your typical ${fmtHours(typical)}.`;
 }
 
 /** Meetings-by-start-hour over the trailing `days`; local time. */
@@ -148,8 +148,8 @@ export function openLoopFacts(items: ActionItem[], today: string): OpenLoopFacts
 export function openLoopHeadline(f: OpenLoopFacts): string {
   if (f.open === 0) {
     return f.closedFromRecent > 0
-      ? `All caught up — ${f.closedFromRecent} item${f.closedFromRecent === 1 ? "" : "s"} from this week's meetings already done.`
-      : "All caught up — no open action items.";
+      ? `All caught up. ${f.closedFromRecent} item${f.closedFromRecent === 1 ? "" : "s"} from this week's meetings already done.`
+      : "All caught up. No open action items.";
   }
   const parts = [
     `${f.open} open item${f.open === 1 ? "" : "s"} across ${f.meetings} meeting${f.meetings === 1 ? "" : "s"}`,
@@ -208,5 +208,5 @@ export function trendSentence(term: string, series: Array<{ month: string; meeti
       : `${name} came up ${inMonth}.`;
   }
   const dir = cur.meetings > prev.meetings ? "up" : "down";
-  return `${name} came up ${inMonth} — ${dir} from ${prev.meetings} in ${monthLabel(prev.month)}.`;
+  return `${name} came up ${inMonth}, ${dir} from ${prev.meetings} in ${monthLabel(prev.month)}.`;
 }

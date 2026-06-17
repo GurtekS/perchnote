@@ -210,7 +210,7 @@ function GenerationSection() {
     <section className="space-y-5 border-t border-border pt-5">
       <SettingsSubsectionHeader
         title="Generation"
-        description="How AI notes get written — applies whichever provider runs them."
+        description="How AI notes get written, whichever provider runs them."
       />
 
       {/* Instant recap */}
@@ -244,7 +244,7 @@ function GenerationSection() {
           <span className="text-xs text-text-muted">
             Name untitled meetings from their transcript when a recording
             finishes. Only placeholder titles like "Untitled Meeting" are
-            swapped — titles you typed are never touched, and there's an
+            swapped. Titles you typed are never touched, and there's an
             Undo on the spot.
           </span>
         </label>
@@ -261,7 +261,7 @@ function GenerationSection() {
             className="mt-0.5 accent-[var(--accent)]"
           />
           <span className="text-xs text-text-muted">
-            AI notes extract action items only for you — the person recording.
+            AI notes extract action items only for you, the person recording.
             What others agreed to do stays in the summary, not your task list.
           </span>
         </label>
@@ -342,11 +342,11 @@ function SemanticRecallSection() {
   const label = !status
     ? "checking"
     : status.backend === "apple"
-      ? "On — Apple on-device"
+      ? "On (Apple on-device)"
       : status.backend === "ollama"
-        ? `On — Ollama (${status.model ?? "?"})`
+        ? `On (Ollama: ${status.model ?? "?"})`
         : downloading
-          ? "Off — downloading Apple model"
+          ? "Off (downloading Apple model)"
           : "Off";
 
   return (
@@ -652,7 +652,7 @@ function OllamaConfig() {
         Recommended: <code className="font-mono">qwen3:8b</code> (16&nbsp;GB Macs) ·{" "}
         <code className="font-mono">qwen3:4b</code> at 8&nbsp;GB ·{" "}
         <code className="font-mono">qwen3:30b-a3b</code> at 32&nbsp;GB. Prefer instruct
-        variants — "thinking" models can break structured notes output.
+        variants. "Thinking" models can break structured notes output.
       </p>
       {!running && (
         <div className="space-y-2 rounded-lg border border-warning/25 bg-warning/5 p-3 text-xs text-text-secondary">

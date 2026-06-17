@@ -1,6 +1,6 @@
 # Contributing to Perchnote
 
-Thanks for the interest. This document is the architecture map — start
+Thanks for the interest. This document is the architecture map: start
 here, then read the code. The codebase is the source of truth; this is
 the index.
 
@@ -18,8 +18,8 @@ Claude-class LLM that turns it into structured notes (sections, action
 items with assignees and deadlines, tags). You can also chat with a
 single transcript or ask AI questions across meetings.
 
-Everything sensitive — audio, transcripts, notes, OAuth tokens, the
-Anthropic API key — lives on the user's machine. The only outbound calls
+Everything sensitive (audio, transcripts, notes, OAuth tokens, the
+Anthropic API key) lives on the user's machine. The only outbound calls
 are the ones the user opts into: calendar sync (Google, Microsoft, ICS),
 Slack sharing, and the chosen AI provider.
 
@@ -32,7 +32,7 @@ Slack sharing, and the chosen AI provider.
 | Desktop shell | Tauri 2 (Rust + WKWebView) |
 | Frontend | React 19, TypeScript, TipTap 2.27 (with `extension-mention`, `suggestion`, `extension-document`), TanStack Router 1.167.4 (pinned, see §10), TanStack Query 5.90.21 (pinned), Zustand, Tailwind CSS |
 | Backend | Rust (stable). SQLite via `rusqlite 0.31` + `rusqlite_migration 1`, `hound 3.5` for WAV I/O, `realfft 3.5` for FFT in mel features, `reqwest 0.12` for HTTP, `keyring 3` (apple-native) for the macOS Keychain |
-| Platform helpers | Swift — `ProcessAudioTap.swift` (Core Audio CATapDescription for system-audio capture), `AppleAI.swift` (FoundationModels integration, macOS 26+). Both compiled into the binary via `build.rs` |
+| Platform helpers | Swift: `ProcessAudioTap.swift` (Core Audio CATapDescription for system-audio capture) and `AppleAI.swift` (FoundationModels integration, macOS 26+). Both compiled into the binary via `build.rs` |
 | Transcription | whisper.cpp invoked as a subprocess (`WhisperSidecar`). Model files are managed in app data dir |
 | AI inference | One of: Anthropic Messages API (`api.anthropic.com/v1/messages` with tool-use for structured output), Ollama (`localhost:11434`), or Apple FoundationModels (on-device, macOS 26+). Provider is per-user via the `ai_provider` setting |
 
@@ -109,7 +109,7 @@ DB file: `~/Library/Application Support/com.perchnote.app/perchnote.db`
 `db/mod.rs` must match the number of `M::up` entries in
 `db/migrations.rs`.
 
-Tables (highlights — see `db/migrations.rs` for the full schema):
+Tables (highlights; see `db/migrations.rs` for the full schema):
 
 | Table | Purpose |
 |---|---|
@@ -119,8 +119,8 @@ Tables (highlights — see `db/migrations.rs` for the full schema):
 | `transcripts_fts` | FTS5 virtual table indexing `segments` for fast full-text search. Auto-maintained by triggers |
 | `chat_messages` | Conversation history for the chat panel; tied to meeting_id (or NULL for cross-meeting chats) |
 | `templates` | Note-generation prompt templates (Standard, Standup, 1:1, Sales Call, etc.) |
-| `settings` | Key-value strings. Non-secret only — secrets go to Keychain |
-| `speaker_labels` | Maps `(meeting_id, speaker_key)` → `display_name`. Per-meeting since migration 11 — naming "Speaker 1" in one meeting doesn't apply to another |
+| `settings` | Key-value strings. Non-secret only; secrets go to Keychain |
+| `speaker_labels` | Maps `(meeting_id, speaker_key)` → `display_name`. Per-meeting since migration 11, so naming "Speaker 1" in one meeting doesn't apply to another |
 | `voice_profiles` | Persistent voice samples: id, speaker_name, sample_path (WAV in `voice_profiles/`), embedding (JSON-encoded 64-dim mel vector, nullable on legacy rows) |
 | `mention_candidates` | Global attendee-name pool for @-mention autocomplete. Capped to top-200 by (freq DESC, last_seen_at DESC). Backfilled from existing meetings on migration 9 |
 | `folders`, `meeting_folders`, `tags`, `meeting_tags` | Organization |
@@ -177,9 +177,9 @@ MicrosoftOAuthTokens, SlackWebhookUrl, AnthropicApiKey.
    - **Ollama**: `format: <schema>` for JSON mode against the local server.
    - **Apple Intelligence**: `@Generable` typed Swift structs, on-device
      via `FoundationModels` (macOS 26+ with Apple Intelligence on).
-4. The frontend's `EnhanceButton` calls `generatedNotesToTiptap(notes)`
-   — a pure transform that builds a TipTap doc with `summary`,
-   `actionItem`, etc. custom nodes — then saves it to
+4. The frontend's `EnhanceButton` calls `generatedNotesToTiptap(notes)`,
+   a pure transform that builds a TipTap doc with `summary`,
+   `actionItem`, etc. custom nodes, then saves it to
    `notes.generated_content` via `update_note_generated_content`.
 5. The animation overlay types the markdown form across the screen
    while the editor swaps to the structured doc.
@@ -225,7 +225,7 @@ When `isEnhanced && notesDisplayMode === "ai"`:
    the full meeting WAV. Threshold 0.88, EMA centroid updates,
    short-segment inheritance. See `src-tauri/src/audio/cluster.rs`.
 
-The cross-meeting matching is mel-feature cosine — a baseline good for
+The cross-meeting matching is mel-feature cosine, a baseline good for
 2–3 person meetings. Better embedding models (ECAPA-TDNN, 3D-Speaker,
 etc.) can swap in behind `match_voice_profile` without changing the
 rest of the pipeline.
@@ -241,28 +241,28 @@ in `MeetingView` routes `onUpdate` JSON to the right column by mode.
 
 Registered extensions live in `src/lib/tiptap/extensions.ts`:
 
-- **StarterKit** — paragraph, heading (h1–h3), bullet/ordered lists,
+- **StarterKit**: paragraph, heading (h1–h3), bullet/ordered lists,
   blockquote, code, code block, hr. Configured with `document: false`
   because we use `DocumentAttrs` instead.
-- **DocumentAttrs** — extends the root Document node with a `tags` attr.
+- **DocumentAttrs** extends the root Document node with a `tags` attr.
 - **Placeholder**, **TaskList/TaskItem**, **Underline**, **Highlight**,
   **Link** (scheme allow-list of http/https/mailto, `isAllowedUri`
   enforces).
-- **Summary** (`summary.ts`) — block node, inline content. Renders as a
+- **Summary** (`summary.ts`): block node, inline content. Renders as a
   card via CSS.
-- **ActionItem** (`actionItem.ts` + `ActionItemView.tsx`) — atom node,
+- **ActionItem** (`actionItem.ts` + `ActionItemView.tsx`): atom node,
   attrs `{task, assignee?, deadline?, done}`. React node view handles
   the checkbox + pills.
-- **Callout** (`callout.ts`) — block node with `variant: "info"|"warn"|"tip"`.
-- **Toggle** (`toggle.ts` + `ToggleView.tsx`) — collapsible. React node
+- **Callout** (`callout.ts`): block node with `variant: "info"|"warn"|"tip"`.
+- **Toggle** (`toggle.ts` + `ToggleView.tsx`): collapsible. React node
   view. **Important**: when collapsing, the view first moves the editor
   cursor out of the body if it's currently inside, otherwise the cursor
   lands in `display: none` DOM and the editor appears frozen.
 - **SlashCommand** (`slashCommand.ts`, `slashCommandItems.ts`,
-  `SlashCommandList.tsx`) — `/` trigger, 13 items (headings, lists,
+  `SlashCommandList.tsx`): `/` trigger, 13 items (headings, lists,
   quote, divider, code, callouts × 3 variants, toggle). Uses
   `@tiptap/suggestion` + `tippy.js`.
-- **MentionExtension** (`mention.ts`, `MentionList.tsx`) — `@` trigger.
+- **MentionExtension** (`mention.ts`, `MentionList.tsx`): `@` trigger.
   Suggestions come from `list_mention_candidates(prefix, 8)` against
   the cross-meeting name pool.
 
@@ -278,17 +278,17 @@ React `NodeViewRenderer`. Static nodes (Summary, Callout) use plain
 `generate_notes`, `rediarize`, `chat`. Each reads the `ai_provider`
 setting (`anthropic` / `ollama` / `apple`) and dispatches to one of:
 
-- `anthropic_api::*` — `https://api.anthropic.com/v1/messages`, uses
-  tool-use with `NOTE_OUTPUT_SCHEMA` / `DIARIZATION_OUTPUT_SCHEMA` for
-  structured outputs. Bring-your-own-key (stored in Keychain as
-  `AnthropicApiKey`). Models picked dynamically —
+- `anthropic_api::*` hits `https://api.anthropic.com/v1/messages` and
+  uses tool-use with `NOTE_OUTPUT_SCHEMA` / `DIARIZATION_OUTPUT_SCHEMA`
+  for structured outputs. Bring-your-own-key (stored in Keychain as
+  `AnthropicApiKey`). Models are picked dynamically:
   `list_anthropic_models` IPC calls `GET /v1/models` so we don't
   maintain a hardcoded list.
-- `ollama::*` — `http://localhost:11434/api/chat`. Uses Ollama's
+- `ollama::*` hits `http://localhost:11434/api/chat`. Uses Ollama's
   `format` parameter for JSON-mode structured outputs. Recovery: if
   the model hallucinates a slightly-off schema,
   `salvage_notes_from_partial` fills in defaults.
-- `apple_ai::*` — calls into `AppleAI.swift` via FFI. Uses
+- `apple_ai::*` calls into `AppleAI.swift` via FFI. Uses
   `LanguageModelSession` from `FoundationModels` (macOS 26+) with
   `@Generable` structs. Returns null on machines without Apple
   Intelligence; the dispatcher then surfaces an error.
@@ -305,7 +305,7 @@ variant, branch in `mod.rs::generate_notes/rediarize/chat`. The Settings
 
 Registered in `src-tauri/src/lib.rs`'s `invoke_handler` list. Frontend
 calls go through `src/lib/ipc.ts` which provides typed wrappers. The
-canonical surface (not exhaustive — read `ipc.ts`):
+canonical surface (not exhaustive, so read `ipc.ts`):
 
 - Audio / recording: `start_recording`, `stop_recording`, `is_recording`,
   `is_paused`, `pause_recording`, `resume_recording`,
@@ -321,7 +321,7 @@ canonical surface (not exhaustive — read `ipc.ts`):
 - Speaker ID: `unknown_speakers_for_meeting`, `identify_speaker`,
   `recluster_speakers`, `get_recording_url`, `list_voice_profiles`.
 - Mentions: `list_mention_candidates`.
-- Settings: `get_setting`, `set_setting` — automatically routes keys
+- Settings: `get_setting`, `set_setting`, which automatically route keys
   in `secret_key_for(...)` to the Keychain.
 - Calendar / sharing: `auth_google_calendar`, `auth_microsoft_calendar`,
   `add_ics_url`, `sync_ics_calendars`, `share_to_slack`.
@@ -389,13 +389,13 @@ open "/Applications/Perchnote.app"
 ```
 
 **Important**: never run plain `cargo build --release` without
-`tauri build` — bare cargo doesn't embed the frontend `dist/`, so the
+`tauri build`. Bare cargo doesn't embed the frontend `dist/`, so the
 resulting binary loads from `localhost:1420` (which isn't running) and
 shows a blank screen. Always use `npm run tauri:build`.
 
 ---
 
-## 10. Pinned dependencies — supply-chain guard
+## 10. Pinned dependencies: supply-chain guard
 
 The `@tanstack/react-router` package was compromised in versions
 **1.167.68–1.167.71** (the "Shai-Hulud" supply-chain attack of
@@ -418,23 +418,23 @@ Upgrading these requires double-checking the upstream advisory list.
 
 - **TipTap nodes with interaction → React node view.** See
   `ActionItemView.tsx` and `ToggleView.tsx` as templates.
-- **Schema-conformant AI output** — always go through tool-use
+- **Schema-conformant AI output.** Always go through tool-use
   (Anthropic) or `format` (Ollama) or `@Generable` (Apple). Don't ask
   the model to "return JSON" in the prompt and parse it.
 - **Custom DOM events for cross-component coordination** when the
   components don't share a clean parent. See §8.2 for the existing
   events; reuse patterns rather than introducing new ones casually.
 - **Secrets go to Keychain**, not SQLite. Use `SecretKey` enum entries.
-- **Migrations** — append `M::up` to `db/migrations.rs`, bump
+- **Migrations.** Append `M::up` to `db/migrations.rs`, bump
   `EXPECTED_MIGRATION_COUNT` in `db/mod.rs`, write a test in
   `migration_N_tests` that confirms the new schema state. Never edit a
   migration that has already shipped.
-- **Tests live next to the surface they test** — Rust tests inline in
+- **Tests live next to the surface they test.** Rust tests inline in
   the file, Vitest tests in `src/__tests__/`. New features ship with
   tests.
 - **Commit message style**: imperative mood, scoped prefix
   (`feat(audio):`, `fix(tiptap):`, `refactor:`, `docs:`, `chore:`).
-- **macOS-only** — the Swift bridges, Keychain, and Core Audio bits are
+- **macOS-only.** The Swift bridges, Keychain, and Core Audio bits are
   deliberately macOS-only. Don't add Linux/Windows-specific paths
   without discussing first.
 
@@ -442,10 +442,10 @@ Upgrading these requires double-checking the upstream advisory list.
 
 - **Reintroducing the Tauri shell plugin or `unsafe-eval`.** Both are
   intentionally absent for security.
-- **Bare `cargo build --release`** for the user's local build — always
-  `npm run tauri:build`. See §9.
+- **Bare `cargo build --release`** for the user's local build. Always
+  use `npm run tauri:build`. See §9.
 - **Writing into `notes.raw_content`** when the editor is in AI Notes
-  mode — route through the existing `handleNoteUpdate` which checks
+  mode. Route through the existing `handleNoteUpdate` which checks
   `notesDisplayMode`.
 - **Putting `useRouter` / `useNavigate` / `useMatchRoute`** in
   components rendered outside `RouterProvider` (e.g., directly in

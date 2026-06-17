@@ -43,7 +43,7 @@ pub async fn import_audio_file(
         .map_err(|_| "File not found or unreadable".to_string())?;
     if !is_importable_audio(&src) {
         return Err(format!(
-            "Unsupported file type — import accepts {}",
+            "Unsupported file type. Import accepts {}",
             IMPORT_EXTENSIONS.join(", ")
         ));
     }
@@ -120,7 +120,7 @@ pub async fn import_audio_file(
             detail
                 .lines()
                 .last()
-                .map(|l| format!(" — {}", l.trim()))
+                .map(|l| format!(": {}", l.trim()))
                 .unwrap_or_default()
         ));
     }

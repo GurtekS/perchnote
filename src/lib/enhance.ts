@@ -68,7 +68,7 @@ export async function runEnhance(
       ...generated.sections.flatMap((s) => [`## ${s.heading}`, ...s.bullets.map((b) => `- ${b}`)]),
       generated.action_items.length ? "## Action Items" : "",
       ...generated.action_items.map((a) => {
-        const suffix = [a.assignee, a.deadline].filter(Boolean).join(" — ");
+        const suffix = [a.assignee, a.deadline].filter(Boolean).join(", ");
         return suffix ? `- ${a.task} (${suffix})` : `- ${a.task}`;
       }),
     ]

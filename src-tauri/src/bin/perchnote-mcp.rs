@@ -39,13 +39,13 @@ const TRANSCRIPT_CAP_BYTES: usize = 100_000;
 const SEARCH_LIMIT_DEFAULT: u64 = 20;
 const SEARCH_LIMIT_MAX: u64 = 50;
 
-const HELP: &str = "perchnote-mcp — local, read-only MCP server for Perchnote (stdio transport)
+const HELP: &str = "perchnote-mcp: local, read-only MCP server for Perchnote (stdio transport)
 
 USAGE: perchnote-mcp [--db <path>]
 
 The database path resolves in order: --db flag, PERCHNOTE_DB env var, then
 the production location (~/Library/Application Support/<bundle id>/perchnote.db).
-Run it from an MCP client config, not by hand — stdin/stdout are the protocol.";
+Run it from an MCP client config, not by hand (stdin/stdout are the protocol).";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

@@ -45,7 +45,7 @@ export function InsightsView() {
     <div className="mx-auto max-w-2xl px-6 py-8">
       <h1 className="m-0 text-lg font-semibold text-text-primary">Insights</h1>
       <p className="mt-1 mb-6 text-xs text-text-muted">
-        Computed on this Mac from your own meetings — nothing leaves it.
+        Computed on this Mac from your own meetings. Nothing leaves it.
       </p>
 
       <div className="space-y-4">
@@ -109,7 +109,7 @@ export function InsightsView() {
           {trends.length === 0 ? (
             <>
               <p className="m-0 text-sm text-text-secondary">
-                Track terms that matter — a project, a customer, "pricing" — and
+                Track terms that matter (a project, a customer, "pricing") and
                 see how often they come up, month over month.
               </p>
               <button
